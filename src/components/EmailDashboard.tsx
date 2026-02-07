@@ -20,7 +20,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { useToast } from "@/hooks/use-toast"; // Import Toast for "Saved" message
+import { useToast } from "@/hooks/use-toast";
 import { Mail, Play, Pause, Trash2, Clock, User, FileText, Eye, Save } from "lucide-react";
 
 type EmailStatus = "pending" | "sending" | "success" | "failed";
@@ -62,7 +62,6 @@ const StatusBadge = ({ status }: { status: EmailStatus }) => {
 
 export const EmailDashboard = () => {
   const { toast } = useToast();
-  // NEW: State for the custom email address
   const [fromEmail, setFromEmail] = useState("");
   const [fromName, setFromName] = useState("");
   const [subject, setSubject] = useState("");
@@ -74,15 +73,27 @@ export const EmailDashboard = () => {
   const isPausedRef = useRef(false);
   const currentIndexRef = useRef(0);
 
-  // NEW: Load saved defaults when the app starts
+  // NEW: Auto-detect default email on load
   useEffect(() => {
     const savedName = localStorage.getItem("defaultFromName");
     const savedEmail = localStorage.getItem("defaultFromEmail");
+    
     if (savedName) setFromName(savedName);
-    if (savedEmail) setFromEmail(savedEmail);
+    
+    if (savedEmail) {
+      // If user saved a preference, use it
+      setFromEmail(savedEmail);
+    } else {
+      // OTHERWISE: Calculate the default Upsun address
+      // 1. Get the current domain (e.g. main-xyz.upsun.app)
+      const hostname = window.location.hostname.replace(/^www\./, '');
+      // 2. Create the no-reply address
+      const defaultEmail = `no-reply@${hostname}`;
+      // 3. Set it in the box
+      setFromEmail(defaultEmail);
+    }
   }, []);
 
-  // NEW: Function to save the current settings to browser memory
   const saveDefaults = () => {
     localStorage.setItem("defaultFromName", fromName);
     localStorage.setItem("defaultFromEmail", fromEmail);
@@ -108,7 +119,7 @@ export const EmailDashboard = () => {
         body: JSON.stringify({
           to: email,
           fromName,
-          fromEmail, // NEW: Sending the custom email to PHP
+          fromEmail,
           subject,
           body: emailBody,
         }),
@@ -237,7 +248,6 @@ export const EmailDashboard = () => {
                   <User className="w-5 h-5 text-primary" />
                   Sender Settings
                 </CardTitle>
-                {/* NEW: The Save Button */}
                 <Button variant="outline" size="sm" onClick={saveDefaults} className="h-8">
                   <Save className="w-4 h-4 mr-2" />
                   Save Defaults
@@ -255,12 +265,11 @@ export const EmailDashboard = () => {
                     onChange={(e) => setFromName(e.target.value)}
                   />
                 </div>
-                {/* NEW: From Email Input */}
                 <div className="space-y-2">
                   <Label htmlFor="fromEmail">From Email</Label>
                   <Input
                     id="fromEmail"
-                    placeholder="contact@mydomain.com"
+                    placeholder="no-reply@..."
                     value={fromEmail}
                     onChange={(e) => setFromEmail(e.target.value)}
                   />
@@ -283,7 +292,7 @@ export const EmailDashboard = () => {
                   </div>
                 </div>
                 <div className="space-y-2">
-                   {/* Spacer to align grid */}
+                   {/* Spacer */}
                 </div>
               </div>
 
@@ -321,7 +330,6 @@ export const EmailDashboard = () => {
           </Card>
         </div>
 
-        {/* Recipients and Results sections remain exactly the same... */}
         <Card className="shadow-sm">
           <CardHeader className="pb-4">
             <CardTitle className="flex items-center gap-2 text-lg">
