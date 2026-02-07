@@ -3,10 +3,11 @@ import { useToast } from "@/hooks/use-toast";
 import { 
   Trash2, Play, Pause, Save, AlertCircle, 
   CheckCircle2, Clock, Upload, Eraser, 
-  Eye, Terminal, Mail, Settings, Activity 
+  Eye, Terminal, Mail, Settings, FileText,
+  User, Activity, Image as ImageIcon, StopCircle, Link as LinkIcon 
 } from "lucide-react";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogFooter
 } from "@/components/ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -18,6 +19,9 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 
 // --- Types ---
 type EmailStatus = "pending" | "sending" | "success" | "failed";
@@ -45,6 +49,14 @@ export const EmailDashboard = () => {
   const [recipients, setRecipients] = useState("");
   const [results, setResults] = useState<EmailResult[]>([]);
   const [isRunning, setIsRunning] = useState(false);
+  // NEW: Track paused state explicitly for UI buttons
+  const [isPaused, setIsPaused] = useState(false);
+  
+  // --- Image Dialog State ---
+  const [showImageDialog, setShowImageDialog] = useState(false);
+  const [imgUrl, setImgUrl] = useState("");
+  const [imgLink, setImgLink] = useState("");
+  const [imgAlign, setImgAlign] = useState("center");
   
   // --- Refs ---
   const isPausedRef = useRef(false);
@@ -74,7 +86,6 @@ export const EmailDashboard = () => {
   };
 
   const totalRecipients = parseEmails(recipients).length;
-  // Progress is now calculated based on how many rows are in the table vs total input
   const progressPercentage = totalRecipients > 0 ? (results.length / totalRecipients) * 100 : 0;
   
   // --- Actions ---
@@ -95,8 +106,41 @@ export const EmailDashboard = () => {
     setResults([]);
     currentIndexRef.current = 0;
     setIsRunning(false);
+    setIsPaused(false);
     isPausedRef.current = false;
     toast({ title: "Reset", description: "Campaign logs cleared." });
+  };
+
+  // NEW: Logic to End the Job Manually
+  const endJob = () => {
+    setIsRunning(false);
+    setIsPaused(false);
+    isPausedRef.current = false;
+    currentIndexRef.current = 0;
+    toast({ title: "Job Stopped", description: "Campaign execution has been ended." });
+  };
+
+  // NEW: Logic to Insert Image HTML
+  const insertImage = () => {
+    if (!imgUrl) return;
+
+    let style = "";
+    if (imgAlign === "center") style = "display:block; margin: 10px auto;";
+    if (imgAlign === "left") style = "float:left; margin: 0 15px 10px 0;";
+    if (imgAlign === "right") style = "float:right; margin: 0 0 10px 15px;";
+
+    const imgTag = `<img src="${imgUrl}" alt="Image" style="max-width:100%; height:auto; ${style}" />`;
+    const finalHtml = imgLink ? `<a href="${imgLink}" target="_blank">${imgTag}</a>` : imgTag;
+
+    // Append to body (with a newline for safety)
+    setEmailBody((prev) => prev + "\n" + finalHtml);
+    
+    // Reset and close
+    setImgUrl("");
+    setImgLink("");
+    setImgAlign("center");
+    setShowImageDialog(false);
+    toast({ title: "Image Added", description: "HTML code appended to editor." });
   };
 
   // --- Core Logic ---
@@ -124,23 +168,27 @@ export const EmailDashboard = () => {
       return;
     }
 
-    // IMPORTANT: We do NOT clear results here if resuming.
-    // If starting fresh (index 0), we clear to ensure no duplicates from previous runs if user didn't click clear.
     if (currentIndexRef.current === 0) {
         setResults([]);
     }
 
     setIsRunning(true);
+    setIsPaused(false); // Make sure UI knows we are running
     isPausedRef.current = false;
     const emailList = emails;
 
     for (let i = currentIndexRef.current; i < emailList.length; i++) {
-      if (isPausedRef.current) { currentIndexRef.current = i; setIsRunning(false); return; }
+      // Check pause ref directly inside the loop
+      if (isPausedRef.current) { 
+        currentIndexRef.current = i; 
+        setIsRunning(true); // Still "running" but paused state active
+        setIsPaused(true);  // Trigger UI update
+        return; 
+      }
 
       const currentEmail = emailList[i];
       const currentId = i + 1;
 
-      // --- STEP 1: Add the new row to the TOP of the list ---
       setResults(prev => [
         {
           index: currentId,
@@ -150,13 +198,11 @@ export const EmailDashboard = () => {
           message: "Sending...",
           rawResponse: undefined
         },
-        ...prev // This puts the new row First, and old rows After
+        ...prev
       ]);
 
-      // --- STEP 2: Send the email ---
       const result = await sendEmail(currentEmail);
       
-      // --- STEP 3: Update the specific row with the result ---
       setResults(prev => prev.map(r => r.index === currentId ? {
         ...r, 
         status: result.success ? "success" : "failed", 
@@ -170,8 +216,20 @@ export const EmailDashboard = () => {
     
     currentIndexRef.current = 0;
     setIsRunning(false);
+    setIsPaused(false);
     toast({ title: "Complete", description: "All emails processed." });
   }, [recipients, fromName, fromEmail, subject, emailBody, delay]);
+
+  const handlePause = () => {
+    isPausedRef.current = true;
+    setIsPaused(true);
+  };
+
+  const handleResume = () => {
+    isPausedRef.current = false;
+    setIsPaused(false);
+    startSending(); // Re-trigger the loop
+  };
 
   return (
     <div className="min-h-screen bg-slate-50/50 p-4 md:p-8 font-sans">
@@ -194,7 +252,7 @@ export const EmailDashboard = () => {
           </div>
           
           <div className="flex items-center gap-3 w-full md:w-auto">
-             {isRunning && (
+             {isRunning && !isPaused && (
                <div className="flex items-center gap-2 text-xs font-medium text-blue-600 bg-blue-50 px-3 py-1.5 rounded-full animate-pulse">
                  <span className="relative flex h-2 w-2">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
@@ -202,6 +260,11 @@ export const EmailDashboard = () => {
                   </span>
                  Sending...
                </div>
+             )}
+             {isPaused && (
+                <Badge variant="secondary" className="bg-yellow-100 text-yellow-700 hover:bg-yellow-200">
+                  Paused
+                </Badge>
              )}
              <Button variant="outline" size="sm" onClick={clearLogs} className="ml-auto">
                <Trash2 className="w-4 h-4 mr-2" /> Clear Logs
@@ -307,10 +370,59 @@ export const EmailDashboard = () => {
                 <Tabs defaultValue="editor" className="w-full">
                   <div className="flex items-center justify-between mb-2">
                     <Label className="text-xs font-semibold text-slate-500">EMAIL CONTENT</Label>
-                    <TabsList className="h-7">
-                      <TabsTrigger value="editor" className="text-[10px] h-5 px-2">Write</TabsTrigger>
-                      <TabsTrigger value="preview" className="text-[10px] h-5 px-2">Preview</TabsTrigger>
-                    </TabsList>
+                    <div className="flex items-center gap-2">
+                      
+                      {/* NEW: ADD IMAGE BUTTON & DIALOG */}
+                      <Dialog open={showImageDialog} onOpenChange={setShowImageDialog}>
+                        <DialogTrigger asChild>
+                          <Button variant="outline" size="xs" className="h-7 text-xs gap-1.5 px-2.5">
+                            <ImageIcon className="w-3.5 h-3.5 text-blue-500" /> Add Image
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent className="sm:max-w-[425px]">
+                          <DialogHeader>
+                            <DialogTitle>Insert Image</DialogTitle>
+                            <DialogDescription>
+                              Enter the URL of the image you want to embed.
+                            </DialogDescription>
+                          </DialogHeader>
+                          <div className="grid gap-4 py-4">
+                            <div className="space-y-2">
+                              <Label htmlFor="imgUrl">Image URL</Label>
+                              <Input id="imgUrl" value={imgUrl} onChange={e => setImgUrl(e.target.value)} placeholder="https://example.com/image.png" />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="imgLink">Link (Optional)</Label>
+                              <div className="relative">
+                                <LinkIcon className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                                <Input id="imgLink" value={imgLink} onChange={e => setImgLink(e.target.value)} placeholder="https://mysite.com" className="pl-9" />
+                              </div>
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Alignment</Label>
+                              <Select value={imgAlign} onValueChange={setImgAlign}>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select alignment" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="left">Left</SelectItem>
+                                  <SelectItem value="center">Center</SelectItem>
+                                  <SelectItem value="right">Right</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                          <DialogFooter>
+                            <Button onClick={insertImage}>Save & Insert</Button>
+                          </DialogFooter>
+                        </DialogContent>
+                      </Dialog>
+
+                      <TabsList className="h-7">
+                        <TabsTrigger value="editor" className="text-[10px] h-5 px-2">Write</TabsTrigger>
+                        <TabsTrigger value="preview" className="text-[10px] h-5 px-2">Preview</TabsTrigger>
+                      </TabsList>
+                    </div>
                   </div>
                   <TabsContent value="editor" className="mt-0">
                     <Textarea 
@@ -345,6 +457,11 @@ export const EmailDashboard = () => {
                 </div>
               )}
               
+              {/* BUTTON LOGIC: 
+                  1. Not Running -> SHOW START 
+                  2. Running but NOT Paused -> SHOW PAUSE 
+                  3. Running AND Paused -> SHOW RESUME + END JOB
+              */}
               {!isRunning ? (
                 <Button 
                   size="lg" 
@@ -352,21 +469,40 @@ export const EmailDashboard = () => {
                   disabled={!recipients.trim()} 
                   className="w-full h-12 text-md shadow-md hover:shadow-lg transition-all"
                 >
-                  {currentIndexRef.current > 0 ? (
-                    <><Play className="w-5 h-5 mr-2" /> Resume Campaign ({totalRecipients - currentIndexRef.current} left)</>
-                  ) : (
-                    <><Play className="w-5 h-5 mr-2" /> Start Campaign ({totalRecipients} emails)</>
-                  )}
+                   {currentIndexRef.current > 0 ? <Play className="w-5 h-5 mr-2" /> : <Play className="w-5 h-5 mr-2" />}
+                   {currentIndexRef.current > 0 ? "Resume Previous Campaign" : "Start Campaign"}
                 </Button>
               ) : (
-                <Button 
-                  size="lg" 
-                  variant="secondary"
-                  onClick={() => isPausedRef.current = true} 
-                  className="w-full h-12 text-md border-2 border-slate-200"
-                >
-                  <Pause className="w-5 h-5 mr-2" /> Pause Campaign
-                </Button>
+                <>
+                  {!isPaused ? (
+                    <Button 
+                      size="lg" 
+                      variant="secondary"
+                      onClick={handlePause} 
+                      className="w-full h-12 text-md border-2 border-slate-200"
+                    >
+                      <Pause className="w-5 h-5 mr-2" /> Pause Campaign
+                    </Button>
+                  ) : (
+                    <div className="flex gap-3">
+                      <Button 
+                        size="lg" 
+                        onClick={handleResume} 
+                        className="flex-1 h-12 text-md bg-green-600 hover:bg-green-700 text-white"
+                      >
+                        <Play className="w-5 h-5 mr-2" /> Resume
+                      </Button>
+                      <Button 
+                        size="lg" 
+                        variant="destructive"
+                        onClick={endJob} 
+                        className="flex-1 h-12 text-md"
+                      >
+                        <StopCircle className="w-5 h-5 mr-2" /> End Job
+                      </Button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
