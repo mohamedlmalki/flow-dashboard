@@ -4,7 +4,7 @@ import {
   Trash2, Play, Pause, Save, AlertCircle, 
   CheckCircle2, Clock, Upload, Eraser, 
   Eye, Terminal, Mail, Settings, FileText,
-  User, Activity, Image as ImageIcon, StopCircle, Link as LinkIcon 
+  User, Activity, Image as ImageIcon, StopCircle, Link as LinkIcon, Timer 
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogFooter
@@ -35,7 +35,11 @@ interface EmailResult {
   rawResponse?: string; 
 }
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const formatTime = (seconds: number) => {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+};
 
 export const EmailDashboard = () => {
   const { toast } = useToast();
@@ -49,9 +53,12 @@ export const EmailDashboard = () => {
   const [recipients, setRecipients] = useState("");
   const [results, setResults] = useState<EmailResult[]>([]);
   const [isRunning, setIsRunning] = useState(false);
-  // NEW: Track paused state explicitly for UI buttons
   const [isPaused, setIsPaused] = useState(false);
   
+  // NEW: Time Tracking State
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const [countdown, setCountdown] = useState(0);
+
   // --- Image Dialog State ---
   const [showImageDialog, setShowImageDialog] = useState(false);
   const [imgUrl, setImgUrl] = useState("");
@@ -62,27 +69,31 @@ export const EmailDashboard = () => {
   const isPausedRef = useRef(false);
   const currentIndexRef = useRef(0);
 
-  // --- Effects ---
+  // --- Effect: Load Defaults ---
   useEffect(() => {
     const savedName = localStorage.getItem("defaultFromName");
     const savedEmail = localStorage.getItem("defaultFromEmail");
-    
-    if (savedName) setFromName(savedName);
-    else setFromName("Upsun User"); 
-    
-    if (savedEmail) setFromEmail(savedEmail);
-    else {
+    if (savedName) setFromName(savedName); else setFromName("Upsun User"); 
+    if (savedEmail) setFromEmail(savedEmail); else {
       const hostname = window.location.hostname.replace(/^www\./, '');
       setFromEmail(`no-reply@${hostname}`);
     }
   }, []);
 
+  // --- Effect: Stopwatch Logic ---
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isRunning && !isPaused) {
+      interval = setInterval(() => {
+        setElapsedTime((prev) => prev + 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [isRunning, isPaused]);
+
   // --- Helpers ---
   const parseEmails = (text: string): string[] => {
-    return text
-      .split(/[\n,;\s]+/)
-      .map((e) => e.trim().toLowerCase())
-      .filter((e) => e && e.includes("@"));
+    return text.split(/[\n,;\s]+/).map(e => e.trim().toLowerCase()).filter(e => e && e.includes("@"));
   };
 
   const totalRecipients = parseEmails(recipients).length;
@@ -108,22 +119,22 @@ export const EmailDashboard = () => {
     setIsRunning(false);
     setIsPaused(false);
     isPausedRef.current = false;
+    setElapsedTime(0); // Reset timer
+    setCountdown(0);
     toast({ title: "Reset", description: "Campaign logs cleared." });
   };
 
-  // NEW: Logic to End the Job Manually
   const endJob = () => {
     setIsRunning(false);
     setIsPaused(false);
     isPausedRef.current = false;
     currentIndexRef.current = 0;
+    setCountdown(0);
     toast({ title: "Job Stopped", description: "Campaign execution has been ended." });
   };
 
-  // NEW: Logic to Insert Image HTML
   const insertImage = () => {
     if (!imgUrl) return;
-
     let style = "";
     if (imgAlign === "center") style = "display:block; margin: 10px auto;";
     if (imgAlign === "left") style = "float:left; margin: 0 15px 10px 0;";
@@ -132,18 +143,11 @@ export const EmailDashboard = () => {
     const imgTag = `<img src="${imgUrl}" alt="Image" style="max-width:100%; height:auto; ${style}" />`;
     const finalHtml = imgLink ? `<a href="${imgLink}" target="_blank">${imgTag}</a>` : imgTag;
 
-    // Append to body (with a newline for safety)
     setEmailBody((prev) => prev + "\n" + finalHtml);
-    
-    // Reset and close
-    setImgUrl("");
-    setImgLink("");
-    setImgAlign("center");
-    setShowImageDialog(false);
+    setImgUrl(""); setImgLink(""); setImgAlign("center"); setShowImageDialog(false);
     toast({ title: "Image Added", description: "HTML code appended to editor." });
   };
 
-  // --- Core Logic ---
   const sendEmail = async (email: string): Promise<{ success: boolean; message?: string; raw?: any }> => {
     try {
       const response = await fetch("/api/index.php", {
@@ -168,37 +172,36 @@ export const EmailDashboard = () => {
       return;
     }
 
+    // Reset timer only if starting fresh
     if (currentIndexRef.current === 0) {
         setResults([]);
+        setElapsedTime(0);
     }
 
     setIsRunning(true);
-    setIsPaused(false); // Make sure UI knows we are running
+    setIsPaused(false);
     isPausedRef.current = false;
     const emailList = emails;
 
     for (let i = currentIndexRef.current; i < emailList.length; i++) {
-      // Check pause ref directly inside the loop
       if (isPausedRef.current) { 
         currentIndexRef.current = i; 
-        setIsRunning(true); // Still "running" but paused state active
-        setIsPaused(true);  // Trigger UI update
+        setIsRunning(true); 
+        setIsPaused(true);  
         return; 
       }
 
       const currentEmail = emailList[i];
       const currentId = i + 1;
 
-      setResults(prev => [
-        {
+      setResults(prev => [{
           index: currentId,
           email: currentEmail,
           status: "sending",
           time: null,
           message: "Sending...",
           rawResponse: undefined
-        },
-        ...prev
+        }, ...prev
       ]);
 
       const result = await sendEmail(currentEmail);
@@ -211,24 +214,35 @@ export const EmailDashboard = () => {
         rawResponse: JSON.stringify(result.raw, null, 2),
       } : r));
 
-      if (i < emailList.length - 1 && !isPausedRef.current) await sleep(delay * 1000);
+      // SMART DELAY LOGIC WITH COUNTDOWN
+      if (i < emailList.length - 1 && !isPausedRef.current) {
+        // We count down the delay seconds
+        for (let s = delay; s > 0; s--) {
+          if (isPausedRef.current) break; // Stop waiting if user pauses
+          setCountdown(s);
+          await new Promise(r => setTimeout(r, 1000));
+        }
+        setCountdown(0);
+      }
     }
     
     currentIndexRef.current = 0;
     setIsRunning(false);
     setIsPaused(false);
+    setCountdown(0);
     toast({ title: "Complete", description: "All emails processed." });
   }, [recipients, fromName, fromEmail, subject, emailBody, delay]);
 
   const handlePause = () => {
     isPausedRef.current = true;
     setIsPaused(true);
+    setCountdown(0); // Clear countdown visual on pause
   };
 
   const handleResume = () => {
     isPausedRef.current = false;
     setIsPaused(false);
-    startSending(); // Re-trigger the loop
+    startSending();
   };
 
   return (
@@ -274,7 +288,7 @@ export const EmailDashboard = () => {
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           
-          {/* --- LEFT COLUMN: RECIPIENTS (5 cols) --- */}
+          {/* --- LEFT COLUMN --- */}
           <div className="lg:col-span-5 flex flex-col gap-6">
             <Card className="flex-1 flex flex-col shadow-sm border-slate-200">
               <CardHeader className="pb-3 space-y-1">
@@ -303,10 +317,8 @@ export const EmailDashboard = () => {
             </Card>
           </div>
 
-          {/* --- RIGHT COLUMN: CONFIGURATION (7 cols) --- */}
+          {/* --- RIGHT COLUMN --- */}
           <div className="lg:col-span-7 flex flex-col gap-6">
-            
-            {/* CONFIG CARD */}
             <Card className="shadow-sm border-slate-200">
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
@@ -319,60 +331,34 @@ export const EmailDashboard = () => {
                 </div>
               </CardHeader>
               <CardContent className="space-y-6">
-                {/* Identity */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label className="text-xs font-semibold text-slate-500">FROM NAME</Label>
-                    <Input 
-                      value={fromName} 
-                      onChange={(e) => setFromName(e.target.value)} 
-                      className="h-9 bg-slate-50/50"
-                    />
+                    <Input value={fromName} onChange={(e) => setFromName(e.target.value)} className="h-9 bg-slate-50/50" />
                   </div>
                   <div className="space-y-2">
                     <Label className="text-xs font-semibold text-slate-500">FROM EMAIL</Label>
-                    <Input 
-                      value={fromEmail} 
-                      onChange={(e) => setFromEmail(e.target.value)} 
-                      className="h-9 bg-slate-50/50 font-mono text-xs"
-                    />
+                    <Input value={fromEmail} onChange={(e) => setFromEmail(e.target.value)} className="h-9 bg-slate-50/50 font-mono text-xs" />
                   </div>
                 </div>
-                
                 <Separator />
-
-                {/* Subject & Delay */}
                 <div className="grid grid-cols-12 gap-4">
                   <div className="col-span-9 space-y-2">
                     <Label className="text-xs font-semibold text-slate-500">SUBJECT LINE</Label>
-                    <Input 
-                      value={subject} 
-                      onChange={(e) => setSubject(e.target.value)} 
-                      placeholder="Special Offer for you..."
-                      className="h-9"
-                    />
+                    <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Special Offer..." className="h-9" />
                   </div>
                   <div className="col-span-3 space-y-2">
                     <Label className="text-xs font-semibold text-slate-500">DELAY (S)</Label>
                     <div className="relative">
                       <Clock className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-slate-400" />
-                      <Input 
-                        type="number" 
-                        value={delay} 
-                        onChange={(e) => setDelay(Number(e.target.value))} 
-                        className="h-9 pl-8"
-                      />
+                      <Input type="number" value={delay} onChange={(e) => setDelay(Number(e.target.value))} className="h-9 pl-8" />
                     </div>
                   </div>
                 </div>
-
-                {/* Content */}
                 <Tabs defaultValue="editor" className="w-full">
                   <div className="flex items-center justify-between mb-2">
                     <Label className="text-xs font-semibold text-slate-500">EMAIL CONTENT</Label>
                     <div className="flex items-center gap-2">
-                      
-                      {/* NEW: ADD IMAGE BUTTON & DIALOG */}
                       <Dialog open={showImageDialog} onOpenChange={setShowImageDialog}>
                         <DialogTrigger asChild>
                           <Button variant="outline" size="xs" className="h-7 text-xs gap-1.5 px-2.5">
@@ -382,9 +368,7 @@ export const EmailDashboard = () => {
                         <DialogContent className="sm:max-w-[425px]">
                           <DialogHeader>
                             <DialogTitle>Insert Image</DialogTitle>
-                            <DialogDescription>
-                              Enter the URL of the image you want to embed.
-                            </DialogDescription>
+                            <DialogDescription>Enter the URL of the image you want to embed.</DialogDescription>
                           </DialogHeader>
                           <div className="grid gap-4 py-4">
                             <div className="space-y-2">
@@ -401,9 +385,7 @@ export const EmailDashboard = () => {
                             <div className="space-y-2">
                               <Label>Alignment</Label>
                               <Select value={imgAlign} onValueChange={setImgAlign}>
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Select alignment" />
-                                </SelectTrigger>
+                                <SelectTrigger><SelectValue placeholder="Select alignment" /></SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="left">Left</SelectItem>
                                   <SelectItem value="center">Center</SelectItem>
@@ -412,12 +394,9 @@ export const EmailDashboard = () => {
                               </Select>
                             </div>
                           </div>
-                          <DialogFooter>
-                            <Button onClick={insertImage}>Save & Insert</Button>
-                          </DialogFooter>
+                          <DialogFooter><Button onClick={insertImage}>Save & Insert</Button></DialogFooter>
                         </DialogContent>
                       </Dialog>
-
                       <TabsList className="h-7">
                         <TabsTrigger value="editor" className="text-[10px] h-5 px-2">Write</TabsTrigger>
                         <TabsTrigger value="preview" className="text-[10px] h-5 px-2">Preview</TabsTrigger>
@@ -425,79 +404,54 @@ export const EmailDashboard = () => {
                     </div>
                   </div>
                   <TabsContent value="editor" className="mt-0">
-                    <Textarea 
-                      value={emailBody}
-                      onChange={(e) => setEmailBody(e.target.value)}
-                      placeholder="<h1>Hello World</h1>"
-                      className="min-h-[200px] font-mono text-sm"
-                    />
+                    <Textarea value={emailBody} onChange={(e) => setEmailBody(e.target.value)} placeholder="<h1>Hello World</h1>" className="min-h-[200px] font-mono text-sm" />
                   </TabsContent>
                   <TabsContent value="preview" className="mt-0">
                     <div className="min-h-[200px] border rounded-md p-4 prose prose-sm max-w-none overflow-y-auto bg-slate-50">
-                      {emailBody ? (
-                        <div dangerouslySetInnerHTML={{ __html: emailBody }} />
-                      ) : (
-                        <p className="text-slate-400 italic">No content to preview</p>
-                      )}
+                      {emailBody ? <div dangerouslySetInnerHTML={{ __html: emailBody }} /> : <p className="text-slate-400 italic">No content to preview</p>}
                     </div>
                   </TabsContent>
                 </Tabs>
               </CardContent>
             </Card>
 
-            {/* ACTION BAR */}
             <div className="grid grid-cols-1 gap-4">
               {results.length > 0 && (
                 <div className="space-y-1">
                   <div className="flex justify-between text-xs text-slate-500">
-                    <span>Progress</span>
+                    {/* UPDATED: Show Countdown if active */}
+                    <span>
+                      {countdown > 0 ? (
+                        <span className="text-blue-600 font-bold animate-pulse">
+                          Waiting {countdown}s...
+                        </span>
+                      ) : (
+                        "Progress"
+                      )}
+                    </span>
                     <span>{Math.round(progressPercentage)}%</span>
                   </div>
                   <Progress value={progressPercentage} className="h-2" />
                 </div>
               )}
               
-              {/* BUTTON LOGIC: 
-                  1. Not Running -> SHOW START 
-                  2. Running but NOT Paused -> SHOW PAUSE 
-                  3. Running AND Paused -> SHOW RESUME + END JOB
-              */}
               {!isRunning ? (
-                <Button 
-                  size="lg" 
-                  onClick={startSending} 
-                  disabled={!recipients.trim()} 
-                  className="w-full h-12 text-md shadow-md hover:shadow-lg transition-all"
-                >
+                <Button size="lg" onClick={startSending} disabled={!recipients.trim()} className="w-full h-12 text-md shadow-md hover:shadow-lg transition-all">
                    {currentIndexRef.current > 0 ? <Play className="w-5 h-5 mr-2" /> : <Play className="w-5 h-5 mr-2" />}
                    {currentIndexRef.current > 0 ? "Resume Previous Campaign" : "Start Campaign"}
                 </Button>
               ) : (
                 <>
                   {!isPaused ? (
-                    <Button 
-                      size="lg" 
-                      variant="secondary"
-                      onClick={handlePause} 
-                      className="w-full h-12 text-md border-2 border-slate-200"
-                    >
+                    <Button size="lg" variant="secondary" onClick={handlePause} className="w-full h-12 text-md border-2 border-slate-200">
                       <Pause className="w-5 h-5 mr-2" /> Pause Campaign
                     </Button>
                   ) : (
                     <div className="flex gap-3">
-                      <Button 
-                        size="lg" 
-                        onClick={handleResume} 
-                        className="flex-1 h-12 text-md bg-green-600 hover:bg-green-700 text-white"
-                      >
+                      <Button size="lg" onClick={handleResume} className="flex-1 h-12 text-md bg-green-600 hover:bg-green-700 text-white">
                         <Play className="w-5 h-5 mr-2" /> Resume
                       </Button>
-                      <Button 
-                        size="lg" 
-                        variant="destructive"
-                        onClick={endJob} 
-                        className="flex-1 h-12 text-md"
-                      >
+                      <Button size="lg" variant="destructive" onClick={endJob} className="flex-1 h-12 text-md">
                         <StopCircle className="w-5 h-5 mr-2" /> End Job
                       </Button>
                     </div>
@@ -505,7 +459,6 @@ export const EmailDashboard = () => {
                 </>
               )}
             </div>
-
           </div>
         </div>
 
@@ -517,7 +470,13 @@ export const EmailDashboard = () => {
                 <Terminal className="w-4 h-4 text-slate-500" />
                 <h3 className="text-sm font-semibold text-slate-700">Execution Terminal</h3>
               </div>
-              <div className="flex gap-4 text-xs font-mono">
+              <div className="flex gap-4 text-xs font-mono items-center">
+                {/* UPDATED: Added Timer Display */}
+                <div className="flex items-center gap-1.5 bg-white border px-2 py-1 rounded text-slate-600">
+                   <Timer className="w-3.5 h-3.5" />
+                   <span>{formatTime(elapsedTime)}</span>
+                </div>
+                <div className="h-4 w-[1px] bg-slate-300 mx-1"></div>
                 <span className="text-green-600">SUCCESS: {results.filter(r => r.status === 'success').length}</span>
                 <span className="text-red-500">FAILED: {results.filter(r => r.status === 'failed').length}</span>
               </div>
