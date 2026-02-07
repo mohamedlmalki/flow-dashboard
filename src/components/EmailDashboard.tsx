@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,7 +12,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Mail, Play, Pause, Trash2, Clock, User, FileText } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { useToast } from "@/hooks/use-toast"; // Import Toast for "Saved" message
+import { Mail, Play, Pause, Trash2, Clock, User, FileText, Eye, Save } from "lucide-react";
 
 type EmailStatus = "pending" | "sending" | "success" | "failed";
 
@@ -22,6 +31,7 @@ interface EmailResult {
   status: EmailStatus;
   time: string | null;
   message: string | null;
+  rawResponse?: string; 
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -29,9 +39,9 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const StatusBadge = ({ status }: { status: EmailStatus }) => {
   const styles = {
     pending: "bg-muted text-muted-foreground",
-    sending: "bg-info/10 text-info",
-    success: "bg-success/10 text-success",
-    failed: "bg-destructive/10 text-destructive",
+    sending: "bg-blue-100 text-blue-700",
+    success: "bg-green-100 text-green-700",
+    failed: "bg-red-100 text-red-700",
   };
 
   const labels = {
@@ -51,6 +61,9 @@ const StatusBadge = ({ status }: { status: EmailStatus }) => {
 };
 
 export const EmailDashboard = () => {
+  const { toast } = useToast();
+  // NEW: State for the custom email address
+  const [fromEmail, setFromEmail] = useState("");
   const [fromName, setFromName] = useState("");
   const [subject, setSubject] = useState("");
   const [delay, setDelay] = useState(2);
@@ -61,6 +74,24 @@ export const EmailDashboard = () => {
   const isPausedRef = useRef(false);
   const currentIndexRef = useRef(0);
 
+  // NEW: Load saved defaults when the app starts
+  useEffect(() => {
+    const savedName = localStorage.getItem("defaultFromName");
+    const savedEmail = localStorage.getItem("defaultFromEmail");
+    if (savedName) setFromName(savedName);
+    if (savedEmail) setFromEmail(savedEmail);
+  }, []);
+
+  // NEW: Function to save the current settings to browser memory
+  const saveDefaults = () => {
+    localStorage.setItem("defaultFromName", fromName);
+    localStorage.setItem("defaultFromEmail", fromEmail);
+    toast({
+      title: "Settings Saved",
+      description: "Your sender details have been saved as default.",
+    });
+  };
+
   const parseEmails = (text: string): string[] => {
     const emails = text
       .split(/[\n,]+/)
@@ -69,7 +100,7 @@ export const EmailDashboard = () => {
     return [...new Set(emails)];
   };
 
-  const sendEmail = async (email: string): Promise<{ success: boolean; message?: string }> => {
+  const sendEmail = async (email: string): Promise<{ success: boolean; message?: string; raw?: any }> => {
     try {
       const response = await fetch("/api/index.php", {
         method: "POST",
@@ -77,21 +108,31 @@ export const EmailDashboard = () => {
         body: JSON.stringify({
           to: email,
           fromName,
+          fromEmail, // NEW: Sending the custom email to PHP
           subject,
           body: emailBody,
         }),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || `HTTP ${response.status}`);
+      const text = await response.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = { error: "Non-JSON response", rawText: text };
       }
 
-      return { success: true };
-    } catch (error) {
+      if (!response.ok) {
+        throw { message: data.message || `HTTP ${response.status}`, raw: data };
+      }
+
+      return { success: true, message: data.message, raw: data };
+
+    } catch (error: any) {
       return {
         success: false,
-        message: error instanceof Error ? error.message : "Unknown error",
+        message: error.message || "Unknown error",
+        raw: error.raw || error,
       };
     }
   };
@@ -99,11 +140,8 @@ export const EmailDashboard = () => {
   const startSending = useCallback(async () => {
     const emails = parseEmails(recipients);
 
-    if (emails.length === 0) {
-      return;
-    }
+    if (emails.length === 0) return;
 
-    // Initialize results if starting fresh
     if (currentIndexRef.current === 0 || results.length === 0) {
       const initialResults: EmailResult[] = emails.map((email, index) => ({
         index: index + 1,
@@ -111,6 +149,7 @@ export const EmailDashboard = () => {
         status: "pending",
         time: null,
         message: null,
+        rawResponse: undefined,
       }));
       setResults(initialResults);
     }
@@ -129,7 +168,6 @@ export const EmailDashboard = () => {
 
       const email = emailList[i];
 
-      // Update status to sending
       setResults((prev) =>
         prev.map((r, idx) =>
           idx === i ? { ...r, status: "sending" as EmailStatus } : r
@@ -139,21 +177,20 @@ export const EmailDashboard = () => {
       const result = await sendEmail(email);
       const timestamp = new Date().toLocaleTimeString();
 
-      // Update with final status
       setResults((prev) =>
         prev.map((r, idx) =>
           idx === i
             ? {
                 ...r,
-                status: result.success ? ("success" as EmailStatus) : ("failed" as EmailStatus),
+                status: result.success ? "success" : "failed",
                 time: timestamp,
-                message: result.message || null,
+                message: result.message || "Done",
+                rawResponse: JSON.stringify(result.raw, null, 2),
               }
             : r
         )
       );
 
-      // Apply delay before next email (except for the last one)
       if (i < emailList.length - 1 && !isPausedRef.current) {
         await sleep(delay * 1000);
       }
@@ -161,7 +198,7 @@ export const EmailDashboard = () => {
 
     currentIndexRef.current = 0;
     setIsRunning(false);
-  }, [recipients, fromName, subject, emailBody, delay, results.length]);
+  }, [recipients, fromName, fromEmail, subject, emailBody, delay, results.length]);
 
   const pauseSending = () => {
     isPausedRef.current = true;
@@ -182,7 +219,6 @@ export const EmailDashboard = () => {
   return (
     <div className="min-h-screen bg-background p-6 md:p-8">
       <div className="max-w-6xl mx-auto space-y-6">
-        {/* Header */}
         <div className="flex items-center gap-3 mb-8">
           <div className="p-3 bg-primary/10 rounded-xl">
             <Mail className="w-8 h-8 text-primary" />
@@ -193,15 +229,20 @@ export const EmailDashboard = () => {
           </div>
         </div>
 
-        {/* Row 1: Sender Settings & Email Content side by side */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Sender Settings */}
           <Card className="shadow-sm">
             <CardHeader className="pb-4">
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <User className="w-5 h-5 text-primary" />
-                Sender Settings
-              </CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <User className="w-5 h-5 text-primary" />
+                  Sender Settings
+                </CardTitle>
+                {/* NEW: The Save Button */}
+                <Button variant="outline" size="sm" onClick={saveDefaults} className="h-8">
+                  <Save className="w-4 h-4 mr-2" />
+                  Save Defaults
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -209,11 +250,24 @@ export const EmailDashboard = () => {
                   <Label htmlFor="fromName">From Name</Label>
                   <Input
                     id="fromName"
-                    placeholder="John Doe"
+                    placeholder="My Company"
                     value={fromName}
                     onChange={(e) => setFromName(e.target.value)}
                   />
                 </div>
+                {/* NEW: From Email Input */}
+                <div className="space-y-2">
+                  <Label htmlFor="fromEmail">From Email</Label>
+                  <Input
+                    id="fromEmail"
+                    placeholder="contact@mydomain.com"
+                    value={fromEmail}
+                    onChange={(e) => setFromEmail(e.target.value)}
+                  />
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="delay">Delay (seconds)</Label>
                   <div className="relative">
@@ -228,7 +282,11 @@ export const EmailDashboard = () => {
                     />
                   </div>
                 </div>
+                <div className="space-y-2">
+                   {/* Spacer to align grid */}
+                </div>
               </div>
+
               <div className="space-y-2">
                 <Label htmlFor="subject">Subject Line</Label>
                 <Input
@@ -241,7 +299,6 @@ export const EmailDashboard = () => {
             </CardContent>
           </Card>
 
-          {/* Email Content */}
           <Card className="shadow-sm">
             <CardHeader className="pb-4">
               <CardTitle className="flex items-center gap-2 text-lg">
@@ -255,7 +312,7 @@ export const EmailDashboard = () => {
                 <Textarea
                   id="body"
                   placeholder="Write your email content here..."
-                  className="min-h-[140px] resize-none"
+                  className="min-h-[220px] resize-none"
                   value={emailBody}
                   onChange={(e) => setEmailBody(e.target.value)}
                 />
@@ -264,7 +321,7 @@ export const EmailDashboard = () => {
           </Card>
         </div>
 
-        {/* Row 2: Recipients */}
+        {/* Recipients and Results sections remain exactly the same... */}
         <Card className="shadow-sm">
           <CardHeader className="pb-4">
             <CardTitle className="flex items-center gap-2 text-lg">
@@ -283,7 +340,7 @@ export const EmailDashboard = () => {
                 </Label>
                 <Textarea
                   id="recipients"
-                  placeholder="john@example.com&#10;jane@example.com&#10;bob@example.com"
+                  placeholder="john@example.com&#10;jane@example.com"
                   className="min-h-[120px] resize-none font-mono text-sm"
                   value={recipients}
                   onChange={(e) => setRecipients(e.target.value)}
@@ -323,7 +380,6 @@ export const EmailDashboard = () => {
           </CardContent>
         </Card>
 
-        {/* Row 3: Sending Results */}
         <Card className="shadow-sm">
           <CardHeader className="pb-4">
             <div className="flex items-center justify-between">
@@ -333,13 +389,13 @@ export const EmailDashboard = () => {
                   Total: <span className="font-semibold text-foreground">{totalEmails}</span>
                 </span>
                 <span className="text-muted-foreground">
-                  Sent: <span className="font-semibold text-success">{successCount}</span>
+                  Sent: <span className="font-semibold text-green-600">{successCount}</span>
                 </span>
                 <span className="text-muted-foreground">
-                  Failed: <span className="font-semibold text-destructive">{failedCount}</span>
+                  Failed: <span className="font-semibold text-red-600">{failedCount}</span>
                 </span>
                 <span className="text-muted-foreground">
-                  Pending: <span className="font-semibold text-info">{pendingCount}</span>
+                  Pending: <span className="font-semibold text-blue-600">{pendingCount}</span>
                 </span>
               </div>
             </div>
@@ -354,7 +410,7 @@ export const EmailDashboard = () => {
                       <TableHead>Recipient Email</TableHead>
                       <TableHead className="w-[100px] text-center">Status</TableHead>
                       <TableHead className="w-[90px] text-center">Time</TableHead>
-                      <TableHead>Message</TableHead>
+                      <TableHead className="w-[80px] text-center">Details</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -388,8 +444,29 @@ export const EmailDashboard = () => {
                           <TableCell className="text-center text-sm text-muted-foreground">
                             {result.time || "—"}
                           </TableCell>
-                          <TableCell className="text-sm text-muted-foreground max-w-[200px] truncate">
-                            {result.message || "—"}
+                          <TableCell className="text-center">
+                            {result.rawResponse ? (
+                              <Dialog>
+                                <DialogTrigger asChild>
+                                  <Button variant="ghost" size="icon" className="h-8 w-8">
+                                    <Eye className="h-4 w-4" />
+                                  </Button>
+                                </DialogTrigger>
+                                <DialogContent className="max-w-[600px] max-h-[80vh] overflow-auto">
+                                  <DialogHeader>
+                                    <DialogTitle>Server Response</DialogTitle>
+                                    <DialogDescription>
+                                      Full technical details returned by the PHP script.
+                                    </DialogDescription>
+                                  </DialogHeader>
+                                  <div className="mt-4 p-4 bg-muted rounded-md font-mono text-xs overflow-x-auto whitespace-pre-wrap">
+                                    {result.rawResponse}
+                                  </div>
+                                </DialogContent>
+                              </Dialog>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))
