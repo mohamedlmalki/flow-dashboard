@@ -74,7 +74,7 @@ export const EmailDashboard = () => {
   };
 
   const totalRecipients = parseEmails(recipients).length;
-  // Progress is now calculated based on how many have been processed vs total input
+  // Progress is now calculated based on how many rows are in the table vs total input
   const progressPercentage = totalRecipients > 0 ? (results.length / totalRecipients) * 100 : 0;
   
   // --- Actions ---
@@ -124,8 +124,11 @@ export const EmailDashboard = () => {
       return;
     }
 
-    // NOTE: Removed the pre-filling logic. 
-    // We now start with whatever results we have (empty or from previous run)
+    // IMPORTANT: We do NOT clear results here if resuming.
+    // If starting fresh (index 0), we clear to ensure no duplicates from previous runs if user didn't click clear.
+    if (currentIndexRef.current === 0) {
+        setResults([]);
+    }
 
     setIsRunning(true);
     isPausedRef.current = false;
@@ -137,23 +140,23 @@ export const EmailDashboard = () => {
       const currentEmail = emailList[i];
       const currentId = i + 1;
 
-      // 1. ADD NEW ROW TO TOP (Sending Status)
+      // --- STEP 1: Add the new row to the TOP of the list ---
       setResults(prev => [
         {
           index: currentId,
           email: currentEmail,
           status: "sending",
           time: null,
-          message: null,
+          message: "Sending...",
           rawResponse: undefined
         },
-        ...prev // Put existing rows AFTER the new one
+        ...prev // This puts the new row First, and old rows After
       ]);
 
-      // 2. SEND EMAIL
+      // --- STEP 2: Send the email ---
       const result = await sendEmail(currentEmail);
       
-      // 3. UPDATE ROW (Success/Failed)
+      // --- STEP 3: Update the specific row with the result ---
       setResults(prev => prev.map(r => r.index === currentId ? {
         ...r, 
         status: result.success ? "success" : "failed", 
