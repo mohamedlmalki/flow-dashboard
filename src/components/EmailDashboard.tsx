@@ -21,7 +21,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Mail, Play, Pause, Trash2, Clock, User, FileText, Eye, Save } from "lucide-react";
+import { Mail, Play, Pause, Trash2, Clock, User, FileText, Eye, Save, Send } from "lucide-react";
 
 type EmailStatus = "pending" | "sending" | "success" | "failed";
 
@@ -73,24 +73,19 @@ export const EmailDashboard = () => {
   const isPausedRef = useRef(false);
   const currentIndexRef = useRef(0);
 
-  // UPDATED: Auto-detect default email AND Name on load
   useEffect(() => {
     const savedName = localStorage.getItem("defaultFromName");
     const savedEmail = localStorage.getItem("defaultFromEmail");
     
-    // 1. Handle From Name
     if (savedName) {
       setFromName(savedName);
     } else {
-      // DEFAULT NAME if nothing is saved
       setFromName("Upsun User"); 
     }
     
-    // 2. Handle From Email
     if (savedEmail) {
       setFromEmail(savedEmail);
     } else {
-      // Calculate the default Upsun address
       const hostname = window.location.hostname.replace(/^www\./, '');
       const defaultEmail = `no-reply@${hostname}`;
       setFromEmail(defaultEmail);
@@ -231,148 +226,134 @@ export const EmailDashboard = () => {
   const pendingCount = results.filter((r) => r.status === "pending" || r.status === "sending").length;
 
   return (
-    <div className="min-h-screen bg-background p-6 md:p-8">
-      <div className="max-w-6xl mx-auto space-y-6">
-        <div className="flex items-center gap-3 mb-8">
+    <div className="min-h-screen bg-background p-6 md:p-8 flex justify-center">
+      {/* CHANGED: max-w-6xl to max-w-2xl for a centered single column layout */}
+      <div className="w-full max-w-2xl space-y-6">
+        
+        {/* Header */}
+        <div className="flex items-center gap-3 mb-4">
           <div className="p-3 bg-primary/10 rounded-xl">
-            <Mail className="w-8 h-8 text-primary" />
+            <Send className="w-6 h-6 text-primary" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-foreground">Bulk Email Dashboard</h1>
-            <p className="text-muted-foreground">Send emails sequentially with custom delays</p>
+            <h1 className="text-xl font-bold text-foreground">Bulk Emailer</h1>
+            <p className="text-sm text-muted-foreground">Send sequences via Upsun PHP</p>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card className="shadow-sm">
-            <CardHeader className="pb-4">
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <User className="w-5 h-5 text-primary" />
-                  Sender Settings
-                </CardTitle>
-                <Button variant="outline" size="sm" onClick={saveDefaults} className="h-8">
-                  <Save className="w-4 h-4 mr-2" />
-                  Save Defaults
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="fromName">From Name</Label>
-                  <Input
-                    id="fromName"
-                    placeholder="Upsun User"
-                    value={fromName}
-                    onChange={(e) => setFromName(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="fromEmail">From Email</Label>
-                  <Input
-                    id="fromEmail"
-                    placeholder="no-reply@..."
-                    value={fromEmail}
-                    onChange={(e) => setFromEmail(e.target.value)}
-                  />
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="delay">Delay (seconds)</Label>
-                  <div className="relative">
-                    <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                    <Input
-                      id="delay"
-                      type="number"
-                      min={0}
-                      className="pl-10"
-                      value={delay}
-                      onChange={(e) => setDelay(Number(e.target.value))}
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                   {/* Spacer */}
-                </div>
-              </div>
-
+        {/* SECTION 1: Sender & Configuration */}
+        <Card className="shadow-sm">
+          <CardHeader className="pb-4">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base font-medium flex items-center gap-2">
+                <User className="w-4 h-4 text-primary" />
+                Configuration
+              </CardTitle>
+              <Button variant="ghost" size="sm" onClick={saveDefaults} className="h-8 text-xs">
+                <Save className="w-3 h-3 mr-2" />
+                Save Defaults
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Row 1: Name & Email */}
+            <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="subject">Subject Line</Label>
+                <Label htmlFor="fromName" className="text-xs">From Name</Label>
+                <Input
+                  id="fromName"
+                  placeholder="Upsun User"
+                  value={fromName}
+                  onChange={(e) => setFromName(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="fromEmail" className="text-xs">From Email</Label>
+                <Input
+                  id="fromEmail"
+                  placeholder="no-reply@..."
+                  value={fromEmail}
+                  onChange={(e) => setFromEmail(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {/* Row 2: Delay & Subject */}
+            <div className="grid grid-cols-4 gap-4">
+              <div className="col-span-1 space-y-2">
+                <Label htmlFor="delay" className="text-xs">Delay (s)</Label>
+                <Input
+                  id="delay"
+                  type="number"
+                  min={0}
+                  value={delay}
+                  onChange={(e) => setDelay(Number(e.target.value))}
+                />
+              </div>
+              <div className="col-span-3 space-y-2">
+                <Label htmlFor="subject" className="text-xs">Subject</Label>
                 <Input
                   id="subject"
-                  placeholder="Enter email subject..."
+                  placeholder="Subject line..."
                   value={subject}
                   onChange={(e) => setSubject(e.target.value)}
                 />
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </CardContent>
+        </Card>
 
-          <Card className="shadow-sm">
-            <CardHeader className="pb-4">
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <FileText className="w-5 h-5 text-primary" />
-                Email Content
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                <Label htmlFor="body">Email Body</Label>
-                <Textarea
-                  id="body"
-                  placeholder="Write your email content here..."
-                  className="min-h-[220px] resize-none"
-                  value={emailBody}
-                  onChange={(e) => setEmailBody(e.target.value)}
-                />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Recipients and Results sections remain exactly the same... */}
+        {/* SECTION 2: Message Body */}
         <Card className="shadow-sm">
-          <CardHeader className="pb-4">
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Mail className="w-5 h-5 text-primary" />
-              Recipients
+           <CardHeader className="pb-2 pt-4">
+            <CardTitle className="text-base font-medium flex items-center gap-2">
+              <FileText className="w-4 h-4 text-primary" />
+              Message Body
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <div className="lg:col-span-2 space-y-2">
-                <Label htmlFor="recipients">
-                  Bulk Email Addresses
-                  <span className="text-muted-foreground text-sm ml-2">
-                    (comma or newline separated)
-                  </span>
-                </Label>
-                <Textarea
-                  id="recipients"
-                  placeholder="john@example.com&#10;jane@example.com"
-                  className="min-h-[120px] resize-none font-mono text-sm"
-                  value={recipients}
-                  onChange={(e) => setRecipients(e.target.value)}
-                />
-              </div>
-              <div className="flex flex-col justify-end gap-3">
-                {!isRunning ? (
+            <Textarea
+              id="body"
+              placeholder="Hello HTML content supported..."
+              className="min-h-[150px] resize-y"
+              value={emailBody}
+              onChange={(e) => setEmailBody(e.target.value)}
+            />
+          </CardContent>
+        </Card>
+
+        {/* SECTION 3: Recipients & Actions */}
+        <Card className="shadow-sm">
+          <CardHeader className="pb-2 pt-4">
+            <CardTitle className="text-base font-medium flex items-center gap-2">
+              <Mail className="w-4 h-4 text-primary" />
+              Recipients List
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Textarea
+              id="recipients"
+              placeholder="Paste emails here (one per line)..."
+              className="min-h-[120px] font-mono text-sm"
+              value={recipients}
+              onChange={(e) => setRecipients(e.target.value)}
+            />
+            
+            <div className="flex gap-3">
+               {!isRunning ? (
                   <Button
                     onClick={startSending}
-                    className="w-full"
+                    className="flex-1"
                     disabled={!recipients.trim()}
                   >
                     <Play className="w-4 h-4 mr-2" />
-                    {currentIndexRef.current > 0 ? "Resume Sending" : "Start Sending"}
+                    {currentIndexRef.current > 0 ? "Resume" : "Start Sending"}
                   </Button>
                 ) : (
                   <Button
                     onClick={pauseSending}
                     variant="secondary"
-                    className="w-full"
+                    className="flex-1"
                   >
                     <Pause className="w-4 h-4 mr-2" />
                     Pause
@@ -381,103 +362,73 @@ export const EmailDashboard = () => {
                 <Button
                   onClick={clearResults}
                   variant="outline"
-                  className="w-full"
                   disabled={isRunning}
                 >
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Clear Results
+                  <Trash2 className="w-4 h-4" />
                 </Button>
-              </div>
             </div>
           </CardContent>
         </Card>
 
+        {/* SECTION 4: Results Table */}
         <Card className="shadow-sm">
           <CardHeader className="pb-4">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-lg">Sending Results</CardTitle>
-              <div className="flex gap-4 text-sm">
-                <span className="text-muted-foreground">
-                  Total: <span className="font-semibold text-foreground">{totalEmails}</span>
-                </span>
-                <span className="text-muted-foreground">
-                  Sent: <span className="font-semibold text-green-600">{successCount}</span>
-                </span>
-                <span className="text-muted-foreground">
-                  Failed: <span className="font-semibold text-red-600">{failedCount}</span>
-                </span>
-                <span className="text-muted-foreground">
-                  Pending: <span className="font-semibold text-blue-600">{pendingCount}</span>
-                </span>
+              <CardTitle className="text-base">Log</CardTitle>
+              <div className="flex gap-3 text-xs">
+                <span className="text-muted-foreground">Sent: <b className="text-green-600">{successCount}</b></span>
+                <span className="text-muted-foreground">Fail: <b className="text-red-600">{failedCount}</b></span>
+                <span className="text-muted-foreground">Left: <b className="text-blue-600">{pendingCount}</b></span>
               </div>
             </div>
           </CardHeader>
-          <CardContent>
-            <div className="border rounded-lg overflow-hidden">
-              <div className="max-h-[400px] overflow-auto">
+          <CardContent className="p-0">
+              <div className="max-h-[300px] overflow-auto">
                 <Table>
-                  <TableHeader className="sticky top-0 bg-muted/80 backdrop-blur-sm z-10">
+                  <TableHeader className="sticky top-0 bg-background z-10">
                     <TableRow>
-                      <TableHead className="w-[50px] text-center">#</TableHead>
-                      <TableHead>Recipient Email</TableHead>
-                      <TableHead className="w-[100px] text-center">Status</TableHead>
-                      <TableHead className="w-[90px] text-center">Time</TableHead>
-                      <TableHead className="w-[80px] text-center">Details</TableHead>
+                      <TableHead className="w-[40px] text-center">#</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead className="w-[80px] text-center">Status</TableHead>
+                      <TableHead className="w-[50px]"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {results.length === 0 ? (
                       <TableRow>
-                        <TableCell
-                          colSpan={5}
-                          className="h-[150px] text-center text-muted-foreground"
-                        >
-                          <div className="flex flex-col items-center gap-2">
-                            <Mail className="w-10 h-10 text-muted-foreground/30" />
-                            <p>No emails processed yet</p>
-                            <p className="text-sm">
-                              Add recipients and click "Start Sending"
-                            </p>
-                          </div>
+                        <TableCell colSpan={4} className="h-24 text-center text-muted-foreground text-xs">
+                          Waiting to start...
                         </TableCell>
                       </TableRow>
                     ) : (
                       results.map((result) => (
                         <TableRow key={result.index}>
-                          <TableCell className="text-center font-medium text-muted-foreground">
+                          <TableCell className="text-center text-xs text-muted-foreground">
                             {result.index}
                           </TableCell>
-                          <TableCell className="font-mono text-sm">
+                          <TableCell className="text-xs font-mono truncate max-w-[150px]">
                             {result.email}
                           </TableCell>
                           <TableCell className="text-center">
                             <StatusBadge status={result.status} />
                           </TableCell>
-                          <TableCell className="text-center text-sm text-muted-foreground">
-                            {result.time || "—"}
-                          </TableCell>
                           <TableCell className="text-center">
-                            {result.rawResponse ? (
+                            {result.rawResponse && (
                               <Dialog>
                                 <DialogTrigger asChild>
-                                  <Button variant="ghost" size="icon" className="h-8 w-8">
-                                    <Eye className="h-4 w-4" />
+                                  <Button variant="ghost" size="icon" className="h-6 w-6">
+                                    <Eye className="h-3 w-3" />
                                   </Button>
                                 </DialogTrigger>
-                                <DialogContent className="max-w-[600px] max-h-[80vh] overflow-auto">
+                                <DialogContent className="max-w-[500px] max-h-[80vh] overflow-auto">
                                   <DialogHeader>
-                                    <DialogTitle>Server Response</DialogTitle>
-                                    <DialogDescription>
-                                      Full technical details returned by the PHP script.
-                                    </DialogDescription>
+                                    <DialogTitle>Raw Response</DialogTitle>
                                   </DialogHeader>
-                                  <div className="mt-4 p-4 bg-muted rounded-md font-mono text-xs overflow-x-auto whitespace-pre-wrap">
+                                  <pre className="mt-2 p-3 bg-muted rounded-md text-[10px] whitespace-pre-wrap">
                                     {result.rawResponse}
-                                  </div>
+                                  </pre>
                                 </DialogContent>
                               </Dialog>
-                            ) : (
-                              <span className="text-muted-foreground">—</span>
                             )}
                           </TableCell>
                         </TableRow>
@@ -486,7 +437,6 @@ export const EmailDashboard = () => {
                   </TableBody>
                 </Table>
               </div>
-            </div>
           </CardContent>
         </Card>
       </div>
