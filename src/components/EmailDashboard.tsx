@@ -73,23 +73,26 @@ export const EmailDashboard = () => {
   const isPausedRef = useRef(false);
   const currentIndexRef = useRef(0);
 
-  // NEW: Auto-detect default email on load
+  // UPDATED: Auto-detect default email AND Name on load
   useEffect(() => {
     const savedName = localStorage.getItem("defaultFromName");
     const savedEmail = localStorage.getItem("defaultFromEmail");
     
-    if (savedName) setFromName(savedName);
+    // 1. Handle From Name
+    if (savedName) {
+      setFromName(savedName);
+    } else {
+      // DEFAULT NAME if nothing is saved
+      setFromName("Upsun User"); 
+    }
     
+    // 2. Handle From Email
     if (savedEmail) {
-      // If user saved a preference, use it
       setFromEmail(savedEmail);
     } else {
-      // OTHERWISE: Calculate the default Upsun address
-      // 1. Get the current domain (e.g. main-xyz.upsun.app)
+      // Calculate the default Upsun address
       const hostname = window.location.hostname.replace(/^www\./, '');
-      // 2. Create the no-reply address
       const defaultEmail = `no-reply@${hostname}`;
-      // 3. Set it in the box
       setFromEmail(defaultEmail);
     }
   }, []);
@@ -260,7 +263,7 @@ export const EmailDashboard = () => {
                   <Label htmlFor="fromName">From Name</Label>
                   <Input
                     id="fromName"
-                    placeholder="My Company"
+                    placeholder="Upsun User"
                     value={fromName}
                     onChange={(e) => setFromName(e.target.value)}
                   />
@@ -330,6 +333,7 @@ export const EmailDashboard = () => {
           </Card>
         </div>
 
+        {/* Recipients and Results sections remain exactly the same... */}
         <Card className="shadow-sm">
           <CardHeader className="pb-4">
             <CardTitle className="flex items-center gap-2 text-lg">
