@@ -46,7 +46,6 @@ export const EmailDashboard = () => {
   const [recipients, setRecipients] = useState("");
   const [results, setResults] = useState<EmailResult[]>([]);
   const [isRunning, setIsRunning] = useState(false);
-  const [activeTab, setActiveTab] = useState("editor"); // 'editor' or 'preview'
   
   // --- Refs ---
   const isPausedRef = useRef(false);
@@ -69,7 +68,11 @@ export const EmailDashboard = () => {
 
   // --- Helpers ---
   const parseEmails = (text: string): string[] => {
-    return [...new Set(text.split(/[\n,]+/).map(e => e.trim().toLowerCase()).filter(e => e && e.includes("@")))];
+    // UPDATED: Removed [...new Set(...)] to ALLOW duplicates
+    return text
+      .split(/[\n,;\s]+/) // Split by newline, comma, semicolon, space
+      .map((e) => e.trim().toLowerCase())
+      .filter((e) => e && e.includes("@"));
   };
 
   const totalRecipients = parseEmails(recipients).length;
@@ -83,9 +86,11 @@ export const EmailDashboard = () => {
   };
 
   const cleanList = () => {
-    const valid = parseEmails(recipients);
-    setRecipients(valid.join("\n"));
-    toast({ title: "List Cleaned", description: `Removed duplicates. Total: ${valid.length}` });
+    // NOTE: This button will still remove duplicates if you click it manually
+    const currentList = parseEmails(recipients);
+    const uniqueList = [...new Set(currentList)];
+    setRecipients(uniqueList.join("\n"));
+    toast({ title: "List Cleaned", description: `Removed duplicates. Total: ${uniqueList.length}` });
   };
 
   const clearLogs = () => {
@@ -198,12 +203,12 @@ export const EmailDashboard = () => {
                   <CardTitle className="text-md font-medium">Recipients</CardTitle>
                   <Badge variant="secondary" className="font-mono">{totalRecipients}</Badge>
                 </div>
-                <CardDescription>Enter email addresses, one per line.</CardDescription>
+                <CardDescription>Enter email addresses (duplicates allowed).</CardDescription>
               </CardHeader>
               <CardContent className="flex-1 flex flex-col gap-4 min-h-[500px]">
                 <div className="flex items-center gap-2">
                   <Button variant="ghost" size="xs" onClick={cleanList} className="h-7 text-xs">
-                    <Eraser className="w-3 h-3 mr-1" /> Deduplicate
+                    <Eraser className="w-3 h-3 mr-1" /> Remove Duplicates
                   </Button>
                   <Button variant="ghost" size="xs" className="h-7 text-xs">
                     <Upload className="w-3 h-3 mr-1" /> Import CSV
@@ -212,7 +217,7 @@ export const EmailDashboard = () => {
                 <Textarea 
                   value={recipients}
                   onChange={(e) => setRecipients(e.target.value)}
-                  placeholder="alice@example.com&#10;bob@example.com"
+                  placeholder="alice@example.com&#10;alice@example.com"
                   className="flex-1 font-mono text-sm resize-none bg-slate-50 focus:bg-white transition-colors border-slate-200" 
                 />
               </CardContent>
