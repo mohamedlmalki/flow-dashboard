@@ -3,8 +3,7 @@ import { useToast } from "@/hooks/use-toast";
 import { 
   Trash2, Play, Pause, Save, AlertCircle, 
   CheckCircle2, Clock, Upload, Eraser, 
-  Eye, Terminal, Mail, Settings, FileText,
-  User, ChevronRight, Activity 
+  Eye, Terminal, Mail, Settings, Activity 
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription
@@ -68,15 +67,15 @@ export const EmailDashboard = () => {
 
   // --- Helpers ---
   const parseEmails = (text: string): string[] => {
-    // UPDATED: Removed [...new Set(...)] to ALLOW duplicates
     return text
-      .split(/[\n,;\s]+/) // Split by newline, comma, semicolon, space
+      .split(/[\n,;\s]+/)
       .map((e) => e.trim().toLowerCase())
       .filter((e) => e && e.includes("@"));
   };
 
   const totalRecipients = parseEmails(recipients).length;
-  const progressPercentage = results.length > 0 ? (results.findIndex(r => r.status === 'pending') === -1 ? 100 : (results.filter(r => r.status !== 'pending').length / results.length) * 100) : 0;
+  // Progress is now calculated based on how many have been processed vs total input
+  const progressPercentage = totalRecipients > 0 ? (results.length / totalRecipients) * 100 : 0;
   
   // --- Actions ---
   const saveDefaults = () => {
@@ -86,7 +85,6 @@ export const EmailDashboard = () => {
   };
 
   const cleanList = () => {
-    // NOTE: This button will still remove duplicates if you click it manually
     const currentList = parseEmails(recipients);
     const uniqueList = [...new Set(currentList)];
     setRecipients(uniqueList.join("\n"));
@@ -126,11 +124,8 @@ export const EmailDashboard = () => {
       return;
     }
 
-    if (currentIndexRef.current === 0 || results.length === 0) {
-      setResults(emails.map((email, index) => ({
-        index: index + 1, email, status: "pending", time: null, message: null, rawResponse: undefined,
-      })));
-    }
+    // NOTE: Removed the pre-filling logic. 
+    // We now start with whatever results we have (empty or from previous run)
 
     setIsRunning(true);
     isPausedRef.current = false;
@@ -139,10 +134,27 @@ export const EmailDashboard = () => {
     for (let i = currentIndexRef.current; i < emailList.length; i++) {
       if (isPausedRef.current) { currentIndexRef.current = i; setIsRunning(false); return; }
 
-      setResults(prev => prev.map((r, idx) => idx === i ? { ...r, status: "sending" } : r));
-      const result = await sendEmail(emailList[i]);
+      const currentEmail = emailList[i];
+      const currentId = i + 1;
+
+      // 1. ADD NEW ROW TO TOP (Sending Status)
+      setResults(prev => [
+        {
+          index: currentId,
+          email: currentEmail,
+          status: "sending",
+          time: null,
+          message: null,
+          rawResponse: undefined
+        },
+        ...prev // Put existing rows AFTER the new one
+      ]);
+
+      // 2. SEND EMAIL
+      const result = await sendEmail(currentEmail);
       
-      setResults(prev => prev.map((r, idx) => idx === i ? {
+      // 3. UPDATE ROW (Success/Failed)
+      setResults(prev => prev.map(r => r.index === currentId ? {
         ...r, 
         status: result.success ? "success" : "failed", 
         time: new Date().toLocaleTimeString(),
@@ -152,10 +164,11 @@ export const EmailDashboard = () => {
 
       if (i < emailList.length - 1 && !isPausedRef.current) await sleep(delay * 1000);
     }
+    
     currentIndexRef.current = 0;
     setIsRunning(false);
     toast({ title: "Complete", description: "All emails processed." });
-  }, [recipients, fromName, fromEmail, subject, emailBody, delay, results.length]);
+  }, [recipients, fromName, fromEmail, subject, emailBody, delay]);
 
   return (
     <div className="min-h-screen bg-slate-50/50 p-4 md:p-8 font-sans">
