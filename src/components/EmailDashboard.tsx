@@ -71,7 +71,7 @@ export const EmailDashboard = () => {
 
   const sendEmail = async (email: string): Promise<{ success: boolean; message?: string }> => {
     try {
-      const response = await fetch("http://localhost:5000/api/send", {
+      const response = await fetch("/api/index.php", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
