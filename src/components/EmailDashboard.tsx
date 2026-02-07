@@ -1,17 +1,18 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Button } from "@/components/ui/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { useToast } from "@/hooks/use-toast";
+import { 
+  Trash2, 
+  Mail, 
+  Play, 
+  Pause, 
+  Save, 
+  AlertCircle, 
+  CheckCircle2, 
+  Clock, 
+  Upload, 
+  Eraser, 
+  Eye 
+} from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -20,9 +21,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { useToast } from "@/hooks/use-toast";
-import { Mail, Play, Pause, Trash2, Clock, User, FileText, Eye, Save, Send } from "lucide-react";
 
+// --- Types ---
 type EmailStatus = "pending" | "sending" | "success" | "failed";
 
 interface EmailResult {
@@ -34,411 +34,372 @@ interface EmailResult {
   rawResponse?: string; 
 }
 
+// --- Helper: Sleep ---
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-const StatusBadge = ({ status }: { status: EmailStatus }) => {
-  const styles = {
-    pending: "bg-muted text-muted-foreground",
-    sending: "bg-blue-100 text-blue-700",
-    success: "bg-green-100 text-green-700",
-    failed: "bg-red-100 text-red-700",
-  };
-
-  const labels = {
-    pending: "Pending",
-    sending: "Sending...",
-    success: "Success",
-    failed: "Failed",
-  };
-
-  return (
-    <span
-      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${styles[status]}`}
-    >
-      {labels[status]}
-    </span>
-  );
-};
 
 export const EmailDashboard = () => {
   const { toast } = useToast();
-  const [fromEmail, setFromEmail] = useState("");
+  
+  // --- State ---
   const [fromName, setFromName] = useState("");
+  const [fromEmail, setFromEmail] = useState("");
   const [subject, setSubject] = useState("");
   const [delay, setDelay] = useState(2);
   const [emailBody, setEmailBody] = useState("");
   const [recipients, setRecipients] = useState("");
   const [results, setResults] = useState<EmailResult[]>([]);
   const [isRunning, setIsRunning] = useState(false);
+  
+  // --- Refs ---
   const isPausedRef = useRef(false);
   const currentIndexRef = useRef(0);
 
+  // --- Effect: Load Defaults & Auto-Detect Domain ---
   useEffect(() => {
     const savedName = localStorage.getItem("defaultFromName");
     const savedEmail = localStorage.getItem("defaultFromEmail");
     
-    if (savedName) {
-      setFromName(savedName);
-    } else {
-      setFromName("Upsun User"); 
-    }
+    // Name
+    if (savedName) setFromName(savedName);
+    else setFromName("Upsun User"); 
     
-    if (savedEmail) {
-      setFromEmail(savedEmail);
-    } else {
+    // Email
+    if (savedEmail) setFromEmail(savedEmail);
+    else {
       const hostname = window.location.hostname.replace(/^www\./, '');
-      const defaultEmail = `no-reply@${hostname}`;
-      setFromEmail(defaultEmail);
+      setFromEmail(`no-reply@${hostname}`);
     }
   }, []);
 
+  // --- Action: Save Defaults ---
   const saveDefaults = () => {
     localStorage.setItem("defaultFromName", fromName);
     localStorage.setItem("defaultFromEmail", fromEmail);
-    toast({
-      title: "Settings Saved",
-      description: "Your sender details have been saved as default.",
+    toast({ 
+      title: "Configuration Saved", 
+      description: "Sender details have been updated as default.",
+      duration: 3000
     });
   };
 
+  // --- Helper: Parse Emails ---
   const parseEmails = (text: string): string[] => {
-    const emails = text
-      .split(/[\n,]+/)
-      .map((email) => email.trim().toLowerCase())
-      .filter((email) => email && email.includes("@"));
-    return [...new Set(emails)];
+    return [...new Set(text.split(/[\n,]+/).map(e => e.trim().toLowerCase()).filter(e => e && e.includes("@")))];
   };
 
+  // --- Action: Clean List ---
+  const cleanList = () => {
+    const valid = parseEmails(recipients);
+    setRecipients(valid.join("\n"));
+    toast({ title: "List Cleaned", description: `Formatted ${valid.length} unique emails.` });
+  };
+
+  // --- Logic: Send Single Email ---
   const sendEmail = async (email: string): Promise<{ success: boolean; message?: string; raw?: any }> => {
     try {
       const response = await fetch("/api/index.php", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          to: email,
-          fromName,
-          fromEmail,
-          subject,
-          body: emailBody,
-        }),
+        body: JSON.stringify({ to: email, fromName, fromEmail, subject, body: emailBody }),
       });
 
       const text = await response.text();
       let data;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        data = { error: "Non-JSON response", rawText: text };
-      }
+      try { data = JSON.parse(text); } catch { data = { error: "Non-JSON response", rawText: text }; }
 
-      if (!response.ok) {
-        throw { message: data.message || `HTTP ${response.status}`, raw: data };
-      }
-
+      if (!response.ok) throw { message: data.message || `HTTP ${response.status}`, raw: data };
       return { success: true, message: data.message, raw: data };
-
     } catch (error: any) {
-      return {
-        success: false,
-        message: error.message || "Unknown error",
-        raw: error.raw || error,
-      };
+      return { success: false, message: error.message || "Unknown error", raw: error.raw || error };
     }
   };
 
+  // --- Logic: Main Loop ---
   const startSending = useCallback(async () => {
     const emails = parseEmails(recipients);
-
-    if (emails.length === 0) return;
+    if (emails.length === 0) {
+      toast({ title: "Empty List", description: "Please add recipient emails.", variant: "destructive" });
+      return;
+    }
 
     if (currentIndexRef.current === 0 || results.length === 0) {
-      const initialResults: EmailResult[] = emails.map((email, index) => ({
-        index: index + 1,
-        email,
-        status: "pending",
-        time: null,
-        message: null,
-        rawResponse: undefined,
-      }));
-      setResults(initialResults);
+      setResults(emails.map((email, index) => ({
+        index: index + 1, email, status: "pending", time: null, message: null, rawResponse: undefined,
+      })));
     }
 
     setIsRunning(true);
     isPausedRef.current = false;
 
-    const emailList = currentIndexRef.current === 0 ? emails : emails;
+    // Use a local variable to track list length in case it changes (though usually locked)
+    const emailList = emails;
 
     for (let i = currentIndexRef.current; i < emailList.length; i++) {
-      if (isPausedRef.current) {
-        currentIndexRef.current = i;
-        setIsRunning(false);
-        return;
-      }
+      if (isPausedRef.current) { currentIndexRef.current = i; setIsRunning(false); return; }
 
-      const email = emailList[i];
+      // Update status to sending
+      setResults(prev => prev.map((r, idx) => idx === i ? { ...r, status: "sending" } : r));
+      
+      const result = await sendEmail(emailList[i]);
+      
+      // Update result
+      setResults(prev => prev.map((r, idx) => idx === i ? {
+        ...r, 
+        status: result.success ? "success" : "failed", 
+        time: new Date().toLocaleTimeString(),
+        message: result.message || "Done", 
+        rawResponse: JSON.stringify(result.raw, null, 2),
+      } : r));
 
-      setResults((prev) =>
-        prev.map((r, idx) =>
-          idx === i ? { ...r, status: "sending" as EmailStatus } : r
-        )
-      );
-
-      const result = await sendEmail(email);
-      const timestamp = new Date().toLocaleTimeString();
-
-      setResults((prev) =>
-        prev.map((r, idx) =>
-          idx === i
-            ? {
-                ...r,
-                status: result.success ? "success" : "failed",
-                time: timestamp,
-                message: result.message || "Done",
-                rawResponse: JSON.stringify(result.raw, null, 2),
-              }
-            : r
-        )
-      );
-
-      if (i < emailList.length - 1 && !isPausedRef.current) {
-        await sleep(delay * 1000);
-      }
+      if (i < emailList.length - 1 && !isPausedRef.current) await sleep(delay * 1000);
     }
-
     currentIndexRef.current = 0;
     setIsRunning(false);
+    toast({ title: "Campaign Finished", description: `Processed ${emailList.length} emails.` });
   }, [recipients, fromName, fromEmail, subject, emailBody, delay, results.length]);
 
-  const pauseSending = () => {
-    isPausedRef.current = true;
+  const pauseSending = () => isPausedRef.current = true;
+  
+  const clearResults = () => { 
+    setResults([]); 
+    currentIndexRef.current = 0; 
+    setIsRunning(false); 
+    isPausedRef.current = false; 
+    toast({ title: "Logs Cleared", description: "Ready for a new campaign." });
   };
 
-  const clearResults = () => {
-    setResults([]);
-    currentIndexRef.current = 0;
-    setIsRunning(false);
-    isPausedRef.current = false;
-  };
-
-  const totalEmails = results.length;
+  // --- Stats ---
   const successCount = results.filter((r) => r.status === "success").length;
   const failedCount = results.filter((r) => r.status === "failed").length;
-  const pendingCount = results.filter((r) => r.status === "pending" || r.status === "sending").length;
+  const totalCount = parseEmails(recipients).length;
 
+  // --- Render ---
   return (
-    <div className="min-h-screen bg-background p-6 md:p-8 flex justify-center">
-      {/* CHANGED: max-w-6xl to max-w-2xl for a centered single column layout */}
-      <div className="w-full max-w-2xl space-y-6">
-        
+    <div className="min-h-screen bg-[#f5f7fb] p-6 md:p-10 font-sans text-slate-800">
+      
+      {/* Main Container */}
+      <div className="max-w-[1100px] mx-auto bg-white rounded-[14px] shadow-[0_10px_30px_rgba(0,0,0,0.08)] p-6 md:p-8">
+
         {/* Header */}
-        <div className="flex items-center gap-3 mb-4">
-          <div className="p-3 bg-primary/10 rounded-xl">
-            <Send className="w-6 h-6 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-foreground">Bulk Emailer</h1>
-            <p className="text-sm text-muted-foreground">Send sequences via Upsun PHP</p>
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+          <h2 className="text-[18px] font-semibold flex items-center gap-2 text-slate-800">
+            <span className="text-xl">✈</span> Upsun Bulk Emailer
+          </h2>
+          <div className="flex gap-2">
+            <button 
+              onClick={clearResults}
+              className="bg-[#f1f3f7] hover:bg-slate-200 transition-colors border-none py-2 px-3.5 rounded-[8px] text-[13px] font-medium text-slate-600 flex items-center gap-2"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Clear Logs
+            </button>
+            <button className="bg-[#f1f3f7] hover:bg-slate-200 transition-colors border-none py-2 px-3.5 rounded-[8px] text-[13px] font-medium text-slate-600 flex items-center gap-2">
+              <AlertCircle className="w-3.5 h-3.5" /> Failures: {failedCount}
+            </button>
           </div>
         </div>
 
-        {/* SECTION 1: Sender & Configuration */}
-        <Card className="shadow-sm">
-          <CardHeader className="pb-4">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base font-medium flex items-center gap-2">
-                <User className="w-4 h-4 text-primary" />
-                Configuration
-              </CardTitle>
-              <Button variant="ghost" size="sm" onClick={saveDefaults} className="h-8 text-xs">
-                <Save className="w-3 h-3 mr-2" />
-                Save Defaults
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Row 1: Name & Email */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="fromName" className="text-xs">From Name</Label>
-                <Input
-                  id="fromName"
-                  placeholder="Upsun User"
-                  value={fromName}
-                  onChange={(e) => setFromName(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="fromEmail" className="text-xs">From Email</Label>
-                <Input
-                  id="fromEmail"
-                  placeholder="no-reply@..."
-                  value={fromEmail}
-                  onChange={(e) => setFromEmail(e.target.value)}
-                />
-              </div>
-            </div>
+        {/* Grid Layout */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-            {/* Row 2: Delay & Subject */}
-            <div className="grid grid-cols-4 gap-4">
-              <div className="col-span-1 space-y-2">
-                <Label htmlFor="delay" className="text-xs">Delay (s)</Label>
-                <Input
-                  id="delay"
-                  type="number"
-                  min={0}
-                  value={delay}
-                  onChange={(e) => setDelay(Number(e.target.value))}
-                />
-              </div>
-              <div className="col-span-3 space-y-2">
-                <Label htmlFor="subject" className="text-xs">Subject</Label>
-                <Input
-                  id="subject"
-                  placeholder="Subject line..."
-                  value={subject}
-                  onChange={(e) => setSubject(e.target.value)}
-                />
-              </div>
+          {/* LEFT COLUMN */}
+          <div>
+            <label className="block text-[13px] font-medium text-[#333] mb-1.5">Recipient Emails</label>
+            <div className="flex gap-2 mb-2">
+              <button 
+                onClick={cleanList}
+                className="bg-[#f1f3f7] hover:bg-slate-200 transition-colors border-none py-1.5 px-3 rounded-[8px] text-[12px] font-medium text-slate-600 flex items-center gap-1"
+              >
+                <Eraser className="w-3 h-3" /> Clean List
+              </button>
+              <button className="bg-[#f1f3f7] hover:bg-slate-200 transition-colors border-none py-1.5 px-3 rounded-[8px] text-[12px] font-medium text-slate-600 flex items-center gap-1">
+                <Upload className="w-3 h-3" /> Import
+              </button>
+              <span className="text-[11px] text-slate-400 flex items-center ml-auto">
+                {totalCount} recipients
+              </span>
             </div>
-          </CardContent>
-        </Card>
-
-        {/* SECTION 2: Message Body */}
-        <Card className="shadow-sm">
-           <CardHeader className="pb-2 pt-4">
-            <CardTitle className="text-base font-medium flex items-center gap-2">
-              <FileText className="w-4 h-4 text-primary" />
-              Message Body
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Textarea
-              id="body"
-              placeholder="Hello HTML content supported..."
-              className="min-h-[150px] resize-y"
-              value={emailBody}
-              onChange={(e) => setEmailBody(e.target.value)}
-            />
-          </CardContent>
-        </Card>
-
-        {/* SECTION 3: Recipients & Actions */}
-        <Card className="shadow-sm">
-          <CardHeader className="pb-2 pt-4">
-            <CardTitle className="text-base font-medium flex items-center gap-2">
-              <Mail className="w-4 h-4 text-primary" />
-              Recipients List
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <Textarea
-              id="recipients"
-              placeholder="Paste emails here (one per line)..."
-              className="min-h-[120px] font-mono text-sm"
+            <textarea 
               value={recipients}
               onChange={(e) => setRecipients(e.target.value)}
+              placeholder="user1@example.com&#10;user2@example.com"
+              className="w-full min-h-[400px] border border-[#e3e6ee] rounded-[10px] p-3 text-[14px] outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-50 transition-all font-mono"
             />
-            
-            <div className="flex gap-3">
-               {!isRunning ? (
-                  <Button
-                    onClick={startSending}
-                    className="flex-1"
-                    disabled={!recipients.trim()}
-                  >
-                    <Play className="w-4 h-4 mr-2" />
-                    {currentIndexRef.current > 0 ? "Resume" : "Start Sending"}
-                  </Button>
-                ) : (
-                  <Button
-                    onClick={pauseSending}
-                    variant="secondary"
-                    className="flex-1"
-                  >
-                    <Pause className="w-4 h-4 mr-2" />
-                    Pause
-                  </Button>
-                )}
-                <Button
-                  onClick={clearResults}
-                  variant="outline"
-                  disabled={isRunning}
-                >
-                  <Trash2 className="w-4 h-4" />
-                </Button>
-            </div>
-          </CardContent>
-        </Card>
+          </div>
 
-        {/* SECTION 4: Results Table */}
-        <Card className="shadow-sm">
-          <CardHeader className="pb-4">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base">Log</CardTitle>
-              <div className="flex gap-3 text-xs">
-                <span className="text-muted-foreground">Sent: <b className="text-green-600">{successCount}</b></span>
-                <span className="text-muted-foreground">Fail: <b className="text-red-600">{failedCount}</b></span>
-                <span className="text-muted-foreground">Left: <b className="text-blue-600">{pendingCount}</b></span>
+          {/* RIGHT COLUMN */}
+          <div className="space-y-5">
+
+            {/* Sender Identity Block */}
+            <div>
+              <label className="block text-[13px] font-medium text-[#333] mb-1.5">Sender Identity</label>
+              <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3 items-start">
+                <input 
+                  value={fromName} 
+                  onChange={(e) => setFromName(e.target.value)}
+                  placeholder="From Name" 
+                  className="w-full border border-[#e3e6ee] rounded-[10px] p-3 text-[14px] outline-none focus:border-blue-400 transition-all"
+                />
+                 <input 
+                  value={fromEmail} 
+                  onChange={(e) => setFromEmail(e.target.value)}
+                  placeholder="From Email" 
+                  className="w-full border border-[#e3e6ee] rounded-[10px] p-3 text-[14px] outline-none focus:border-blue-400 transition-all"
+                />
+                <button 
+                  onClick={saveDefaults}
+                  className="bg-blue-500 hover:bg-blue-600 text-white border-none py-3 px-4 rounded-[10px] cursor-pointer text-sm font-medium transition-colors"
+                >
+                  Save
+                </button>
               </div>
             </div>
-          </CardHeader>
-          <CardContent className="p-0">
-              <div className="max-h-[300px] overflow-auto">
-                <Table>
-                  <TableHeader className="sticky top-0 bg-background z-10">
-                    <TableRow>
-                      <TableHead className="w-[40px] text-center">#</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead className="w-[80px] text-center">Status</TableHead>
-                      <TableHead className="w-[50px]"></TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {results.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={4} className="h-24 text-center text-muted-foreground text-xs">
-                          Waiting to start...
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      results.map((result) => (
-                        <TableRow key={result.index}>
-                          <TableCell className="text-center text-xs text-muted-foreground">
-                            {result.index}
-                          </TableCell>
-                          <TableCell className="text-xs font-mono truncate max-w-[150px]">
-                            {result.email}
-                          </TableCell>
-                          <TableCell className="text-center">
-                            <StatusBadge status={result.status} />
-                          </TableCell>
-                          <TableCell className="text-center">
-                            {result.rawResponse && (
-                              <Dialog>
-                                <DialogTrigger asChild>
-                                  <Button variant="ghost" size="icon" className="h-6 w-6">
-                                    <Eye className="h-3 w-3" />
-                                  </Button>
-                                </DialogTrigger>
-                                <DialogContent className="max-w-[500px] max-h-[80vh] overflow-auto">
-                                  <DialogHeader>
-                                    <DialogTitle>Raw Response</DialogTitle>
-                                  </DialogHeader>
-                                  <pre className="mt-2 p-3 bg-muted rounded-md text-[10px] whitespace-pre-wrap">
-                                    {result.rawResponse}
-                                  </pre>
-                                </DialogContent>
-                              </Dialog>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
+
+            {/* Subject */}
+            <div>
+              <label className="block text-[13px] font-medium text-[#333] mb-1.5">Ticket Subject</label>
+              <input 
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                placeholder="Enter email subject..." 
+                className="w-full border border-[#e3e6ee] rounded-[10px] p-3 text-[14px] outline-none focus:border-blue-400 transition-all"
+              />
+            </div>
+
+            {/* Settings Row */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[13px] font-medium text-[#333] mb-1.5">Delay (Sec)</label>
+                <div className="relative">
+                  <input 
+                    type="number" 
+                    min={0}
+                    value={delay}
+                    onChange={(e) => setDelay(Number(e.target.value))}
+                    className="w-full border border-[#e3e6ee] rounded-[10px] p-3 text-[14px] outline-none focus:border-blue-400 transition-all"
+                  />
+                  <Clock className="absolute right-3 top-3.5 w-4 h-4 text-slate-300 pointer-events-none" />
+                </div>
               </div>
-          </CardContent>
-        </Card>
+              <div>
+                 <label className="block text-[13px] font-medium text-[#333] mb-1.5">Status</label>
+                 <div className="w-full border border-[#e3e6ee] rounded-[10px] p-3 text-[14px] bg-[#f9fafc] text-slate-500">
+                    {isRunning ? "Running..." : "Idle"}
+                 </div>
+              </div>
+            </div>
+
+            {/* Description / Body */}
+            <div>
+              <label className="block text-[13px] font-medium text-[#333] mb-1.5">Ticket Description</label>
+              <div className="flex gap-2 mb-2">
+                <button className="bg-[#f1f3f7] hover:bg-slate-200 transition-colors border-none py-1.5 px-3 rounded-[8px] text-[12px] font-medium text-slate-600">
+                  🖼 Add Image
+                </button>
+                <button className="bg-[#f1f3f7] hover:bg-slate-200 transition-colors border-none py-1.5 px-3 rounded-[8px] text-[12px] font-medium text-slate-600">
+                   Preview
+                </button>
+              </div>
+              <textarea 
+                value={emailBody}
+                onChange={(e) => setEmailBody(e.target.value)}
+                placeholder="Enter email content (HTML supported)..."
+                className="w-full min-h-[160px] border border-[#e3e6ee] rounded-[10px] p-3 text-[14px] outline-none focus:border-blue-400 transition-all font-mono"
+              />
+              <div className="text-[12px] text-[#7a7a7a] mt-1.5">HTML formatting is supported</div>
+            </div>
+
+          </div>
+        </div>
+
+        {/* Footer Action */}
+        <div className="mt-8">
+          {!isRunning ? (
+            <button 
+              onClick={startSending}
+              disabled={!recipients.trim()}
+              className="w-full bg-[#9fc5ff] hover:bg-[#8bb4f5] text-white border-none py-4 text-[16px] font-semibold rounded-[14px] cursor-pointer transition-colors flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+            >
+              {currentIndexRef.current > 0 ? (
+                <><Play className="w-5 h-5" /> Resume Campaign ({totalCount - currentIndexRef.current} left)</>
+              ) : (
+                <><Play className="w-5 h-5" /> Create {totalCount} Tickets</>
+              )}
+            </button>
+          ) : (
+            <button 
+              onClick={pauseSending}
+              className="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 border-none py-4 text-[16px] font-semibold rounded-[14px] cursor-pointer transition-colors flex items-center justify-center gap-2"
+            >
+              <Pause className="w-5 h-5" /> Pause Campaign
+            </button>
+          )}
+        </div>
+
+        {/* Results Table (Hidden unless data exists) */}
+        {results.length > 0 && (
+          <div className="mt-8 border-t border-[#e3e6ee] pt-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+             <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold text-slate-700">Execution Logs</h3>
+                <div className="flex gap-4 text-xs font-medium">
+                  <span className="text-green-600">Success: {successCount}</span>
+                  <span className="text-red-500">Failed: {failedCount}</span>
+                </div>
+             </div>
+             
+             <div className="overflow-hidden rounded-[10px] border border-[#e3e6ee]">
+               <table className="w-full text-[13px] text-left">
+                 <thead className="bg-[#f9fafc] text-slate-500">
+                   <tr>
+                     <th className="p-3 font-medium w-12 text-center">#</th>
+                     <th className="p-3 font-medium">Recipient</th>
+                     <th className="p-3 font-medium w-24 text-center">Status</th>
+                     <th className="p-3 font-medium w-24 text-center">Time</th>
+                     <th className="p-3 font-medium w-16 text-center">Raw</th>
+                   </tr>
+                 </thead>
+                 <tbody className="divide-y divide-[#e3e6ee]">
+                   {results.map((r) => (
+                     <tr key={r.index} className="hover:bg-slate-50 transition-colors">
+                       <td className="p-3 text-center text-slate-400">{r.index}</td>
+                       <td className="p-3 font-mono text-slate-600 truncate max-w-[200px]">{r.email}</td>
+                       <td className="p-3 text-center">
+                         <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-medium
+                           ${r.status === 'success' ? 'bg-green-100 text-green-700' : 
+                             r.status === 'failed' ? 'bg-red-100 text-red-700' : 
+                             r.status === 'sending' ? 'bg-blue-100 text-blue-700' : 
+                             'bg-slate-100 text-slate-500'}`}>
+                           {r.status}
+                         </span>
+                       </td>
+                       <td className="p-3 text-center text-slate-500">{r.time || "-"}</td>
+                       <td className="p-3 text-center">
+                          {r.rawResponse && (
+                             <Dialog>
+                               <DialogTrigger asChild>
+                                 <button className="text-slate-400 hover:text-blue-500 transition-colors">
+                                   <Eye className="w-4 h-4" />
+                                 </button>
+                               </DialogTrigger>
+                               <DialogContent>
+                                 <DialogHeader>
+                                   <DialogTitle>Server Response</DialogTitle>
+                                   <DialogDescription>Raw output from PHP script</DialogDescription>
+                                 </DialogHeader>
+                                 <pre className="bg-slate-100 p-4 rounded-lg text-xs font-mono overflow-auto max-h-[300px] whitespace-pre-wrap">
+                                   {r.rawResponse}
+                                 </pre>
+                               </DialogContent>
+                             </Dialog>
+                          )}
+                       </td>
+                     </tr>
+                   ))}
+                 </tbody>
+               </table>
+             </div>
+          </div>
+        )}
+
       </div>
     </div>
   );
