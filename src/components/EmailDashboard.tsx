@@ -4,7 +4,8 @@ import {
   Trash2, Play, Pause, Save, AlertCircle, 
   CheckCircle2, Clock, Upload, Eraser, 
   Eye, Terminal, Mail, Settings, FileText,
-  User, Activity, Image as ImageIcon, StopCircle, Link as LinkIcon, Timer 
+  User, Activity, Image as ImageIcon, StopCircle, Link as LinkIcon, Timer,
+  Search, ChevronLeft, ChevronRight 
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogFooter
@@ -35,6 +36,8 @@ interface EmailResult {
   rawResponse?: string; 
 }
 
+const ITEMS_PER_PAGE = 100;
+
 const formatTime = (seconds: number) => {
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
@@ -51,15 +54,22 @@ export const EmailDashboard = () => {
   const [delay, setDelay] = useState(2);
   const [emailBody, setEmailBody] = useState("");
   const [recipients, setRecipients] = useState("");
+  
+  // Stats & Results
   const [results, setResults] = useState<EmailResult[]>([]);
+  const [stats, setStats] = useState({ success: 0, failed: 0, processed: 0 });
+  
+  // Controls
   const [isRunning, setIsRunning] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
-  
-  // NEW: Time Tracking State
   const [elapsedTime, setElapsedTime] = useState(0);
   const [countdown, setCountdown] = useState(0);
 
-  // --- Image Dialog State ---
+  // Pagination & Search
+  const [currentPage, setCurrentPage] = useState(1);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Image Dialog
   const [showImageDialog, setShowImageDialog] = useState(false);
   const [imgUrl, setImgUrl] = useState("");
   const [imgLink, setImgLink] = useState("");
@@ -69,7 +79,7 @@ export const EmailDashboard = () => {
   const isPausedRef = useRef(false);
   const currentIndexRef = useRef(0);
 
-  // --- Effect: Load Defaults ---
+  // --- Effects ---
   useEffect(() => {
     const savedName = localStorage.getItem("defaultFromName");
     const savedEmail = localStorage.getItem("defaultFromEmail");
@@ -80,7 +90,6 @@ export const EmailDashboard = () => {
     }
   }, []);
 
-  // --- Effect: Stopwatch Logic ---
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (isRunning && !isPaused) {
@@ -91,13 +100,30 @@ export const EmailDashboard = () => {
     return () => clearInterval(interval);
   }, [isRunning, isPaused]);
 
+  // --- Pagination & Filter Logic ---
+  const filteredResults = results.filter(r => 
+    r.email.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    r.status.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const totalPages = Math.ceil(filteredResults.length / ITEMS_PER_PAGE);
+  const paginatedResults = filteredResults.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE, 
+    currentPage * ITEMS_PER_PAGE
+  );
+
+  // Auto-reset to page 1 if search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery]);
+
   // --- Helpers ---
   const parseEmails = (text: string): string[] => {
     return text.split(/[\n,;\s]+/).map(e => e.trim().toLowerCase()).filter(e => e && e.includes("@"));
   };
 
   const totalRecipients = parseEmails(recipients).length;
-  const progressPercentage = totalRecipients > 0 ? (results.length / totalRecipients) * 100 : 0;
+  const progressPercentage = totalRecipients > 0 ? (stats.processed / totalRecipients) * 100 : 0;
   
   // --- Actions ---
   const saveDefaults = () => {
@@ -115,13 +141,16 @@ export const EmailDashboard = () => {
 
   const clearLogs = () => {
     setResults([]);
+    setStats({ success: 0, failed: 0, processed: 0 });
     currentIndexRef.current = 0;
     setIsRunning(false);
     setIsPaused(false);
     isPausedRef.current = false;
-    setElapsedTime(0); // Reset timer
+    setElapsedTime(0);
     setCountdown(0);
-    toast({ title: "Reset", description: "Campaign logs cleared." });
+    setSearchQuery("");
+    setCurrentPage(1);
+    toast({ title: "Reset", description: "Campaign logs and stats cleared." });
   };
 
   const endJob = () => {
@@ -172,9 +201,9 @@ export const EmailDashboard = () => {
       return;
     }
 
-    // Reset timer only if starting fresh
     if (currentIndexRef.current === 0) {
         setResults([]);
+        setStats({ success: 0, failed: 0, processed: 0 });
         setElapsedTime(0);
     }
 
@@ -194,18 +223,29 @@ export const EmailDashboard = () => {
       const currentEmail = emailList[i];
       const currentId = i + 1;
 
-      setResults(prev => [{
+      // Add to TOP of list, but do NOT delete old ones (Infinite History)
+      setResults(prev => [
+        {
           index: currentId,
           email: currentEmail,
           status: "sending",
           time: null,
           message: "Sending...",
           rawResponse: undefined
-        }, ...prev
+        },
+        ...prev
       ]);
 
       const result = await sendEmail(currentEmail);
       
+      // Update Stats
+      setStats(prev => ({
+        success: prev.success + (result.success ? 1 : 0),
+        failed: prev.failed + (result.success ? 0 : 1),
+        processed: prev.processed + 1
+      }));
+
+      // Update Row
       setResults(prev => prev.map(r => r.index === currentId ? {
         ...r, 
         status: result.success ? "success" : "failed", 
@@ -214,11 +254,9 @@ export const EmailDashboard = () => {
         rawResponse: JSON.stringify(result.raw, null, 2),
       } : r));
 
-      // SMART DELAY LOGIC WITH COUNTDOWN
       if (i < emailList.length - 1 && !isPausedRef.current) {
-        // We count down the delay seconds
         for (let s = delay; s > 0; s--) {
-          if (isPausedRef.current) break; // Stop waiting if user pauses
+          if (isPausedRef.current) break;
           setCountdown(s);
           await new Promise(r => setTimeout(r, 1000));
         }
@@ -236,7 +274,7 @@ export const EmailDashboard = () => {
   const handlePause = () => {
     isPausedRef.current = true;
     setIsPaused(true);
-    setCountdown(0); // Clear countdown visual on pause
+    setCountdown(0);
   };
 
   const handleResume = () => {
@@ -416,18 +454,11 @@ export const EmailDashboard = () => {
             </Card>
 
             <div className="grid grid-cols-1 gap-4">
-              {results.length > 0 && (
+              {totalRecipients > 0 && (results.length > 0 || stats.processed > 0) && (
                 <div className="space-y-1">
                   <div className="flex justify-between text-xs text-slate-500">
-                    {/* UPDATED: Show Countdown if active */}
                     <span>
-                      {countdown > 0 ? (
-                        <span className="text-blue-600 font-bold animate-pulse">
-                          Waiting {countdown}s...
-                        </span>
-                      ) : (
-                        "Progress"
-                      )}
+                      {countdown > 0 ? <span className="text-blue-600 font-bold animate-pulse">Waiting {countdown}s...</span> : "Progress"}
                     </span>
                     <span>{Math.round(progressPercentage)}%</span>
                   </div>
@@ -462,26 +493,49 @@ export const EmailDashboard = () => {
           </div>
         </div>
 
-        {/* --- LOGS SECTION --- */}
+        {/* --- LOGS SECTION WITH PAGINATION & SEARCH --- */}
         {results.length > 0 && (
           <Card className="shadow-sm border-slate-200 overflow-hidden animate-in fade-in slide-in-from-bottom-4">
-            <div className="bg-slate-50 border-b px-4 py-3 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Terminal className="w-4 h-4 text-slate-500" />
-                <h3 className="text-sm font-semibold text-slate-700">Execution Terminal</h3>
+            <div className="bg-slate-50 border-b px-4 py-3 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              
+              {/* Left: Title & Search */}
+              <div className="flex flex-col md:flex-row md:items-center gap-4 w-full md:w-auto">
+                <div className="flex items-center gap-2">
+                  <Terminal className="w-4 h-4 text-slate-500" />
+                  <h3 className="text-sm font-semibold text-slate-700 whitespace-nowrap">Live Feed</h3>
+                </div>
+                
+                {/* Search Bar */}
+                <div className="relative w-full md:w-64">
+                   <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-slate-400" />
+                   <Input 
+                      placeholder="Search email..." 
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="h-8 pl-8 bg-white border-slate-200 text-xs" 
+                   />
+                </div>
+                {searchQuery && (
+                  <Badge variant="secondary" className="text-xs">
+                    Found {filteredResults.length}
+                  </Badge>
+                )}
               </div>
+
+              {/* Right: Counters */}
               <div className="flex gap-4 text-xs font-mono items-center">
-                {/* UPDATED: Added Timer Display */}
                 <div className="flex items-center gap-1.5 bg-white border px-2 py-1 rounded text-slate-600">
                    <Timer className="w-3.5 h-3.5" />
                    <span>{formatTime(elapsedTime)}</span>
                 </div>
-                <div className="h-4 w-[1px] bg-slate-300 mx-1"></div>
-                <span className="text-green-600">SUCCESS: {results.filter(r => r.status === 'success').length}</span>
-                <span className="text-red-500">FAILED: {results.filter(r => r.status === 'failed').length}</span>
+                <div className="h-4 w-[1px] bg-slate-300 mx-1 hidden md:block"></div>
+                <span className="text-green-600 font-bold">SUCCESS: {stats.success}</span>
+                <span className="text-red-500 font-bold">FAILED: {stats.failed}</span>
               </div>
             </div>
-            <ScrollArea className="h-[300px]">
+
+            {/* Table Area */}
+            <ScrollArea className="h-[400px]">
               <div className="p-0">
                 <table className="w-full text-xs text-left">
                   <thead className="bg-white sticky top-0 z-10 shadow-sm text-slate-500">
@@ -494,46 +548,87 @@ export const EmailDashboard = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-mono">
-                    {results.map((r) => (
-                      <tr key={r.index} className="hover:bg-slate-50 group transition-colors">
-                        <td className="p-3 text-center text-slate-400">{r.index}</td>
-                        <td className="p-3 text-slate-700">{r.email}</td>
-                        <td className="p-3 text-center">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider
-                            ${r.status === 'success' ? 'bg-green-50 text-green-700 border border-green-100' : 
-                              r.status === 'failed' ? 'bg-red-50 text-red-700 border border-red-100' : 
-                              r.status === 'sending' ? 'bg-blue-50 text-blue-700 border border-blue-100 animate-pulse' : 
-                              'text-slate-400'}`}>
-                            {r.status}
-                          </span>
-                        </td>
-                        <td className="p-3 text-center text-slate-400">{r.time || "--:--:--"}</td>
-                        <td className="p-3 text-center">
-                          {r.rawResponse && (
-                            <Dialog>
-                              <DialogTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <Eye className="w-3 h-3 text-slate-500" />
-                                </Button>
-                              </DialogTrigger>
-                              <DialogContent className="max-w-2xl">
-                                <DialogHeader>
-                                  <DialogTitle>Server Response</DialogTitle>
-                                  <DialogDescription>Raw JSON output from backend.</DialogDescription>
-                                </DialogHeader>
-                                <div className="bg-slate-950 text-slate-50 p-4 rounded-md overflow-x-auto">
-                                  <pre className="text-xs font-mono">{r.rawResponse}</pre>
-                                </div>
-                              </DialogContent>
-                            </Dialog>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                    {paginatedResults.length > 0 ? (
+                      paginatedResults.map((r) => (
+                        <tr key={r.index} className="hover:bg-slate-50 group transition-colors">
+                          <td className="p-3 text-center text-slate-400">{r.index}</td>
+                          <td className="p-3 text-slate-700">{r.email}</td>
+                          <td className="p-3 text-center">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider
+                              ${r.status === 'success' ? 'bg-green-50 text-green-700 border border-green-100' : 
+                                r.status === 'failed' ? 'bg-red-50 text-red-700 border border-red-100' : 
+                                r.status === 'sending' ? 'bg-blue-50 text-blue-700 border border-blue-100 animate-pulse' : 
+                                'text-slate-400'}`}>
+                              {r.status}
+                            </span>
+                          </td>
+                          <td className="p-3 text-center text-slate-400">{r.time || "--:--:--"}</td>
+                          <td className="p-3 text-center">
+                            {r.rawResponse && (
+                              <Dialog>
+                                <DialogTrigger asChild>
+                                  {/* UPDATED: VISIBLE EYE ICON (No opacity) */}
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-blue-600 hover:bg-blue-50">
+                                    <Eye className="w-3.5 h-3.5" />
+                                  </Button>
+                                </DialogTrigger>
+                                <DialogContent className="max-w-2xl">
+                                  <DialogHeader>
+                                    <DialogTitle>Server Response</DialogTitle>
+                                    <DialogDescription>Raw JSON output from backend.</DialogDescription>
+                                  </DialogHeader>
+                                  <div className="bg-slate-950 text-slate-50 p-4 rounded-md overflow-x-auto">
+                                    <pre className="text-xs font-mono">{r.rawResponse}</pre>
+                                  </div>
+                                </DialogContent>
+                              </Dialog>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                       <tr>
+                         <td colSpan={5} className="p-8 text-center text-slate-400">
+                           No results found for "{searchQuery}"
+                         </td>
+                       </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
             </ScrollArea>
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="bg-white border-t px-4 py-2 flex items-center justify-between">
+                <div className="text-xs text-slate-500">
+                  Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1} to {Math.min(currentPage * ITEMS_PER_PAGE, filteredResults.length)} of {filteredResults.length}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="h-7 w-8 p-0" 
+                    disabled={currentPage === 1}
+                    onClick={() => setCurrentPage(p => p - 1)}
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </Button>
+                  <span className="text-xs font-medium text-slate-700">
+                    Page {currentPage} of {totalPages}
+                  </span>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="h-7 w-8 p-0" 
+                    disabled={currentPage === totalPages}
+                    onClick={() => setCurrentPage(p => p + 1)}
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
           </Card>
         )}
 
