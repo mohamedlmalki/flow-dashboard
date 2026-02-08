@@ -293,14 +293,6 @@ export const EmailDashboard = () => {
             <div className="h-10 w-10 bg-primary/10 rounded-lg flex items-center justify-center">
               <Mail className="h-5 w-5 text-primary" />
             </div>
-            <div>
-              <h1 className="text-xl font-bold tracking-tight text-slate-900">Upsun Dispatcher</h1>
-              <div className="flex items-center gap-2 text-xs text-slate-500">
-                <span className="flex items-center gap-1"><Activity className="w-3 h-3" /> PHP Backend</span>
-                <span>•</span>
-                <span className="flex items-center gap-1"><CheckCircle2 className="w-3 h-3 text-green-500" /> System Ready</span>
-              </div>
-            </div>
           </div>
           
           <div className="flex items-center gap-3 w-full md:w-auto">
